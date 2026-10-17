@@ -1,1 +1,9 @@
 @import "tailwindcss";
+
+/*
+ * The locked area is dark while the rest of the dashboard stays light, so the
+ * `dark:` variant is driven by a wrapper class instead of the operating system's
+ * preference. Only elements inside a `.dark` subtree (`src/app/locked/layout.tsx`)
+ * are affected, which keeps `/` exactly as it was.
+ */
+@custom-variant dark (&:where(.dark, .dark *));

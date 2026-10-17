@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { countLinks, listDomains, listLinks, upsertLink } from "@/db/links";
+import {
+  countLinks,
+  deleteLink,
+  getLinkById,
+  listAllDomains,
+  listDomains,
+  listLinks,
+  updateLink,
+  upsertLink,
+} from "@/db/links";
+import { lockDomain, unlockDomain } from "@/db/locked-domains";
 import { links } from "@/db/schema";
 import type { LinkInput } from "@/lib/validation";
 import { createTestDatabase, type TestDatabase } from "./helpers/test-db";
@@ -486,5 +496,403 @@ describe("countLinks", () => {
     await seed(testDatabase.db);
 
     expect(await countLinks(testDatabase.db)).toBe(4);
+  });
+});
+
+describe("favorite filter", () => {
+  let testDatabase: TestDatabase | undefined;
+
+  afterEach(async () => {
+    await testDatabase?.cleanup();
+    testDatabase = undefined;
+  });
+
+  async function star(db: TestDatabase["db"], url: string): Promise<void> {
+    const row = (await listLinks(db)).find((link) => link.url === url);
+    if (row === undefined) throw new Error(`no seeded link for ${url}`);
+
+    const result = await updateLink(db, row.id, { isFavorite: true });
+    if (!result.ok) throw new Error(`could not star ${url}`);
+  }
+
+  it("returns everything when the filter is off", async () => {
+    testDatabase = await createTestDatabase();
+    await seed(testDatabase.db);
+
+    expect(await listLinks(testDatabase.db, { favorite: false })).toHaveLength(4);
+  });
+
+  it("returns only starred links when it is on", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+    await star(db, "https://example.com/100%-off");
+
+    const rows = await listLinks(db, { favorite: true });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.url).toBe("https://example.com/100%-off");
+    expect(rows[0]?.isFavorite).toBe(true);
+  });
+
+  it("returns nothing when nothing is starred", async () => {
+    testDatabase = await createTestDatabase();
+    await seed(testDatabase.db);
+
+    expect(await listLinks(testDatabase.db, { favorite: true })).toEqual([]);
+  });
+
+  it("combines with the other filters", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+    await star(db, "https://www.indoav.com/video/hotel-room");
+
+    expect(await listLinks(db, { favorite: true, query: "hotel" })).toHaveLength(1);
+    expect(await listLinks(db, { favorite: true, domain: "example.com" })).toEqual([]);
+  });
+});
+
+describe("link scope", () => {
+  let testDatabase: TestDatabase | undefined;
+
+  afterEach(async () => {
+    await testDatabase?.cleanup();
+    testDatabase = undefined;
+  });
+
+  it("defaults to the visible scope, so nothing is hidden until a domain is locked", async () => {
+    testDatabase = await createTestDatabase();
+    await seed(testDatabase.db);
+
+    expect(await listLinks(testDatabase.db)).toHaveLength(4);
+  });
+
+  it("drops the links of a locked domain from the visible scope", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+    await lockDomain(db, "www.indoav.com");
+
+    const rows = await listLinks(db);
+
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.domain === "example.com")).toBe(true);
+  });
+
+  it("returns only the locked domains' links in the locked scope", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+    await lockDomain(db, "www.indoav.com");
+
+    const rows = await listLinks(db, { scope: "locked" });
+
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.domain === "www.indoav.com")).toBe(true);
+  });
+
+  it("returns both sides when the scope is explicitly 'all'", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+    await lockDomain(db, "www.indoav.com");
+
+    // The ingestion API asks for "all": hiding a link from the userscript would
+    // make saving it look broken. The dashboard never asks for it.
+    expect(await listLinks(db, { scope: "all" })).toHaveLength(4);
+    expect(await countLinks(db, { scope: "all" })).toBe(4);
+  });
+
+  it("keeps the filters working in the 'all' scope", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+    await lockDomain(db, "www.indoav.com");
+
+    expect(await listLinks(db, { query: "hotel", scope: "all" })).toHaveLength(2);
+    expect(await listLinks(db, { domain: "example.com", scope: "all" })).toHaveLength(2);
+  });
+
+  it("keeps a locked domain's links out of search results", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+    await lockDomain(db, "www.indoav.com");
+
+    expect(await listLinks(db, { query: "hotel" })).toEqual([]);
+    expect(await listLinks(db, { query: "hotel", scope: "locked" })).toHaveLength(2);
+  });
+
+  it("keeps a locked domain out of reach of the domain filter", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+    await lockDomain(db, "www.indoav.com");
+
+    expect(await listLinks(db, { domain: "www.indoav.com" })).toEqual([]);
+    expect(await listLinks(db, { domain: "www.indoav.com", scope: "locked" })).toHaveLength(2);
+  });
+
+  it("applies the limit inside the scope", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+    await lockDomain(db, "www.indoav.com");
+
+    const rows = await listLinks(db, { limit: 1 });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.domain).toBe("example.com");
+  });
+
+  it("combines the scope with the favorites filter", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+    const indoav = (await listLinks(db)).find((row) => row.domain === "www.indoav.com");
+    if (indoav === undefined) throw new Error("seed is missing an indoav link");
+    await updateLink(db, indoav.id, { isFavorite: true });
+    await lockDomain(db, "www.indoav.com");
+
+    expect(await listLinks(db, { favorite: true })).toEqual([]);
+    expect(await listLinks(db, { favorite: true, scope: "locked" })).toHaveLength(1);
+  });
+
+  it("brings the links back when the domain is unlocked", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+    await lockDomain(db, "www.indoav.com");
+    await unlockDomain(db, "www.indoav.com");
+
+    expect(await listLinks(db)).toHaveLength(4);
+  });
+
+  it("scopes the domain dropdown", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+    await lockDomain(db, "www.indoav.com");
+
+    expect(await listDomains(db)).toEqual([{ domain: "example.com", count: 2 }]);
+    expect(await listDomains(db, { scope: "locked" })).toEqual([
+      { domain: "www.indoav.com", count: 2 },
+    ]);
+  });
+
+  it("can list every domain, ignoring the scope, for the lock panel's suggestions", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+    await lockDomain(db, "www.indoav.com");
+
+    expect(await listAllDomains(db)).toEqual([
+      { domain: "example.com", count: 2 },
+      { domain: "www.indoav.com", count: 2 },
+    ]);
+  });
+
+  it("scopes the count used by the 'N of M' line", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+    await lockDomain(db, "www.indoav.com");
+
+    expect(await countLinks(db)).toBe(2);
+    expect(await countLinks(db, { scope: "locked" })).toBe(2);
+  });
+});
+
+describe("getLinkById", () => {
+  let testDatabase: TestDatabase | undefined;
+
+  afterEach(async () => {
+    await testDatabase?.cleanup();
+    testDatabase = undefined;
+  });
+
+  it("returns the stored row", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const saved = await upsertLink(db, firstSave);
+
+    const row = await getLinkById(db, saved.link.id);
+
+    expect(row?.url).toBe(firstSave.url);
+    expect(row?.isFavorite).toBe(false);
+  });
+
+  it("returns undefined for an unknown id", async () => {
+    testDatabase = await createTestDatabase();
+
+    expect(await getLinkById(testDatabase.db, "nope")).toBeUndefined();
+  });
+
+  it("finds a link that lives in a locked domain", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const saved = await upsertLink(db, firstSave);
+    await lockDomain(db, "example.com");
+
+    expect((await getLinkById(db, saved.link.id))?.id).toBe(saved.link.id);
+  });
+});
+
+describe("updateLink", () => {
+  let testDatabase: TestDatabase | undefined;
+
+  afterEach(async () => {
+    await testDatabase?.cleanup();
+    testDatabase = undefined;
+  });
+
+  it("updates the title, keeps createdAt, and touches updatedAt", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const saved = await upsertLink(db, firstSave);
+
+    const result = await updateLink(db, saved.link.id, { title: "New title" });
+
+    expect(result).toEqual({
+      ok: true,
+      link: expect.objectContaining({
+        id: saved.link.id,
+        title: "New title",
+        createdAt: saved.link.createdAt,
+      }),
+    });
+    if (result.ok) {
+      expect(result.link.updatedAt).toBeGreaterThanOrEqual(saved.link.updatedAt);
+    }
+  });
+
+  it("recomputes the domain when the url changes", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const saved = await upsertLink(db, firstSave);
+
+    const result = await updateLink(db, saved.link.id, {
+      url: "https://other.example/moved",
+      domain: "other.example",
+    });
+
+    expect(result.ok && result.link.domain).toBe("other.example");
+    expect(result.ok && result.link.url).toBe("https://other.example/moved");
+  });
+
+  it("toggles favorites on and off", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const saved = await upsertLink(db, firstSave);
+
+    const starred = await updateLink(db, saved.link.id, { isFavorite: true });
+    expect(starred.ok && starred.link.isFavorite).toBe(true);
+
+    const unstarred = await updateLink(db, saved.link.id, { isFavorite: false });
+    expect(unstarred.ok && unstarred.link.isFavorite).toBe(false);
+  });
+
+  it("clears the thumbnail with an explicit null", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const saved = await upsertLink(db, firstSave);
+
+    const result = await updateLink(db, saved.link.id, { thumbnail: null });
+
+    expect(result.ok && result.link.thumbnail).toBeNull();
+  });
+
+  it("reports an unknown id instead of creating a row", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+
+    expect(await updateLink(db, "nope", { title: "x" })).toEqual({
+      ok: false,
+      reason: "not-found",
+    });
+    expect(await listLinks(db)).toEqual([]);
+  });
+
+  it("refuses a url that another link already owns, and changes nothing", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const first = await upsertLink(db, firstSave);
+    const second = await upsertLink(db, { ...firstSave, url: "https://example.com/second" });
+
+    const result = await updateLink(db, second.link.id, {
+      url: firstSave.url,
+      domain: "example.com",
+    });
+
+    expect(result).toEqual({ ok: false, reason: "url-taken" });
+    expect((await getLinkById(db, second.link.id))?.url).toBe("https://example.com/second");
+  });
+
+  it("allows saving a url that the same link already has", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const saved = await upsertLink(db, firstSave);
+
+    const result = await updateLink(db, saved.link.id, {
+      url: firstSave.url,
+      domain: "example.com",
+      title: "Retitled",
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("lets a link move into a locked domain, where it leaves the visible scope", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const saved = await upsertLink(db, firstSave);
+    await lockDomain(db, "example.com");
+
+    const result = await updateLink(db, saved.link.id, {
+      url: "https://visible.example/here",
+      domain: "visible.example",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(await listLinks(db)).toHaveLength(1);
+    expect(await listLinks(db, { scope: "locked" })).toEqual([]);
+  });
+});
+
+describe("deleteLink", () => {
+  let testDatabase: TestDatabase | undefined;
+
+  afterEach(async () => {
+    await testDatabase?.cleanup();
+    testDatabase = undefined;
+  });
+
+  it("deletes the row and reports success", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const saved = await upsertLink(db, firstSave);
+
+    expect(await deleteLink(db, saved.link.id)).toBe(true);
+    expect(await listLinks(db)).toEqual([]);
+  });
+
+  it("reports an unknown id without touching the others", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await upsertLink(db, firstSave);
+
+    expect(await deleteLink(db, "nope")).toBe(false);
+    expect(await listLinks(db)).toHaveLength(1);
+  });
+
+  it("deletes a link inside a locked domain", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const saved = await upsertLink(db, firstSave);
+    await lockDomain(db, "example.com");
+
+    expect(await deleteLink(db, saved.link.id)).toBe(true);
+    expect(await countLinks(db, { scope: "locked" })).toBe(0);
   });
 });

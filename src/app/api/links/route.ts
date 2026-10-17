@@ -121,7 +121,10 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   try {
-    const rows = await listLinks(getDb(), { limit: limit.data });
+    // `scope: "all"` on purpose: this endpoint is behind SECRET_KEY and feeds the
+    // userscript, which must see every link it has saved. The dashboard pages are
+    // the ones that hide locked domains, and they ask for "visible" (the default).
+    const rows = await listLinks(getDb(), { limit: limit.data, scope: "all" });
 
     return json({
       ok: true,

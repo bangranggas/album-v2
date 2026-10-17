@@ -40,4 +40,42 @@ describe("resolveNextPath", () => {
       DEFAULT_NEXT_PATH,
     );
   });
+
+  describe("blocked prefixes", () => {
+    it("still refuses the login page by default", () => {
+      expect(resolveNextPath("/login")).toBe(DEFAULT_NEXT_PATH);
+    });
+
+    it("accepts the locked area when no extra prefix is blocked", () => {
+      expect(resolveNextPath("/locked")).toBe("/locked");
+    });
+
+    it("refuses whichever prefixes the caller blocks", () => {
+      const options = { blockedPrefixes: ["/login", "/locked/unlock"] };
+
+      expect(resolveNextPath("/locked/unlock", options)).toBe(DEFAULT_NEXT_PATH);
+      expect(
+        resolveNextPath("/locked/unlock?next=/locked", options),
+      ).toBe(DEFAULT_NEXT_PATH);
+      expect(resolveNextPath("/locked/unlock/extra", options)).toBe(
+        DEFAULT_NEXT_PATH,
+      );
+    });
+
+    it("still accepts a path that merely starts like a blocked prefix", () => {
+      expect(
+        resolveNextPath("/locked/unlocked", {
+          blockedPrefixes: ["/login", "/locked/unlock"],
+        }),
+      ).toBe("/locked/unlocked");
+    });
+
+    it("keeps the locked list reachable while blocking the passcode page", () => {
+      expect(
+        resolveNextPath("/locked?q=hotel", {
+          blockedPrefixes: ["/login", "/locked/unlock"],
+        }),
+      ).toBe("/locked?q=hotel");
+    });
+  });
 });

@@ -15,6 +15,7 @@ vi.mock("@/db/client", async (importOriginal) => {
 });
 
 const { GET, OPTIONS, POST } = await import("@/app/api/links/route");
+const { lockDomain } = await import("@/db/locked-domains");
 
 const SECRET = "test-secret-key";
 const validPayload = {
@@ -229,6 +230,23 @@ describe("/api/links", () => {
         "https://example.com/2",
         "https://example.com/1",
       ]);
+    });
+
+    it("keeps returning links whose domain is locked", async () => {
+      await POST(postRequest(validPayload, SECRET));
+      await lockDomain(dbState.db, "example.com");
+
+      const response = await GET(getRequest("", SECRET));
+      const body = await response.json();
+
+      // The userscript sits behind SECRET_KEY and is a machine interface, not a
+      // screen: hiding a link from it would only make saving look like it failed.
+      expect(body.data.links).toHaveLength(1);
+      expect(body.data.links[0]).toMatchObject({
+        url: validPayload.url,
+        domain: "example.com",
+        isFavorite: false,
+      });
     });
 
     it("honours the limit parameter", async () => {

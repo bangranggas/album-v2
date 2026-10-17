@@ -5,6 +5,12 @@ export const MAX_TITLE_LENGTH = 512;
 export const DEFAULT_LIMIT = 100;
 export const MAX_LIMIT = 200;
 
+/**
+ * Longest host allowed for a locked domain. The DNS limit (253 characters), which
+ * also bounds what `links.domain` can hold.
+ */
+export const MAX_DOMAIN_LENGTH = 253;
+
 export type ParseResult<T> =
   | { ok: true; data: T }
   | { ok: false; message: string };
@@ -17,8 +23,31 @@ export interface LinkInput {
   domain: string;
 }
 
+/**
+ * A partial edit of a stored link. Only the fields present are written, so a
+ * favorite toggle cannot clear a thumbnail by omission.
+ *
+ * `domain` is never read from the client: it is derived from `url` whenever a new
+ * URL is given, so a caller cannot hand a link a domain that does not match it.
+ */
+export interface LinkPatch {
+  title?: string;
+  url?: string;
+  domain?: string;
+  thumbnail?: string | null;
+  isFavorite?: boolean;
+}
+
+export interface LockedDomainInput {
+  domain: string;
+}
+
 export interface LoginInput {
   password: string;
+}
+
+export interface PasscodeInput {
+  passcode: string;
 }
 
 function parseHttpUrl(value: string): URL | null {
@@ -87,6 +116,11 @@ const linkInputSchema = z
     }),
   );
 
+/** Guards the shape every payload parser accepts: a JSON object, nothing else. */
+function isPlainObject(raw: unknown): raw is Record<string, unknown> {
+  return typeof raw === "object" && raw !== null && !Array.isArray(raw);
+}
+
 /** Renders the first Zod issue as `field: reason` for API error messages. */
 function describeIssue(error: z.ZodError): string {
   const issue = error.issues[0];
@@ -97,7 +131,7 @@ function describeIssue(error: z.ZodError): string {
 }
 
 export function parseLinkInput(raw: unknown): ParseResult<LinkInput> {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+  if (!isPlainObject(raw)) {
     return { ok: false, message: "payload: must be a JSON object" };
   }
 
@@ -110,6 +144,200 @@ export function parseLinkInput(raw: unknown): ParseResult<LinkInput> {
 }
 
 /**
+ * A placeholder title for a link added by hand without one: `host + path`, e.g.
+ * `example.com/article`. The query string is dropped because it is usually noise,
+ * and the result is capped so the database constraint always holds.
+ */
+export function deriveTitleFromUrl(value: string): string {
+  const parsed = parseHttpUrl(value);
+  if (parsed === null) {
+    return value.trim().slice(0, MAX_TITLE_LENGTH);
+  }
+
+  const path = parsed.pathname.replace(/\/+$/, "");
+
+  return `${parsed.host}${path}`.slice(0, MAX_TITLE_LENGTH);
+}
+
+/**
+ * The manual "add a link" form. Identical to the userscript payload except that
+ * the title is optional, in which case it is derived from the URL.
+ */
+const manualLinkInputSchema = z
+  .object({
+    url: urlField,
+    title: z
+      .string()
+      .trim()
+      .max(MAX_TITLE_LENGTH, `must be at most ${MAX_TITLE_LENGTH} characters`)
+      .optional(),
+    thumbnail: z.union([z.string(), z.null()]).optional(),
+  })
+  .superRefine((value, ctx) => {
+    const thumbnail = normalizeThumbnail(value.thumbnail);
+    if (thumbnail === null) return;
+
+    if (thumbnail.length > MAX_URL_LENGTH || !isHttpUrl(thumbnail)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["thumbnail"],
+        message: "must be an absolute http(s) URL, or empty",
+      });
+    }
+  })
+  .transform(
+    (value): LinkInput => ({
+      url: value.url,
+      title:
+        value.title === undefined || value.title === ""
+          ? deriveTitleFromUrl(value.url)
+          : value.title,
+      thumbnail: normalizeThumbnail(value.thumbnail),
+      domain: parseHttpUrl(value.url)?.host ?? "",
+    }),
+  );
+
+export function parseManualLinkInput(raw: unknown): ParseResult<LinkInput> {
+  if (!isPlainObject(raw)) {
+    return { ok: false, message: "payload: must be a JSON object" };
+  }
+
+  const result = manualLinkInputSchema.safeParse(raw);
+  if (!result.success) {
+    return { ok: false, message: describeIssue(result.error) };
+  }
+
+  return { ok: true, data: result.data };
+}
+
+/**
+ * A partial edit. Unknown fields are dropped by Zod, which is what keeps a
+ * client-supplied `domain` from ever reaching the database.
+ */
+const linkPatchSchema = z
+  .object({
+    title: titleField.optional(),
+    url: urlField.optional(),
+    thumbnail: z.union([z.string(), z.null()]).optional(),
+    isFavorite: z.boolean().optional(),
+  })
+  .superRefine((value, ctx) => {
+    const thumbnail = normalizeThumbnail(value.thumbnail);
+    if (thumbnail === null) return;
+
+    if (thumbnail.length > MAX_URL_LENGTH || !isHttpUrl(thumbnail)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["thumbnail"],
+        message: "must be an absolute http(s) URL, or empty",
+      });
+    }
+  })
+  .transform((value): LinkPatch => {
+    const patch: LinkPatch = {};
+
+    if (value.title !== undefined) patch.title = value.title;
+    if (value.isFavorite !== undefined) patch.isFavorite = value.isFavorite;
+    if (value.thumbnail !== undefined) {
+      patch.thumbnail = normalizeThumbnail(value.thumbnail);
+    }
+    if (value.url !== undefined) {
+      patch.url = value.url;
+      patch.domain = parseHttpUrl(value.url)?.host ?? "";
+    }
+
+    return patch;
+  });
+
+export function parseLinkPatch(raw: unknown): ParseResult<LinkPatch> {
+  if (!isPlainObject(raw)) {
+    return { ok: false, message: "payload: must be a JSON object" };
+  }
+
+  const result = linkPatchSchema.safeParse(raw);
+  if (!result.success) {
+    return { ok: false, message: describeIssue(result.error) };
+  }
+
+  if (Object.keys(result.data).length === 0) {
+    return { ok: false, message: "payload: no fields to update" };
+  }
+
+  return { ok: true, data: result.data };
+}
+
+/** One DNS label: no leading or trailing hyphen, lowercase alphanumerics only. */
+const DOMAIN_LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+
+/** A value that already carries an explicit scheme, e.g. a pasted URL. */
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
+
+/**
+ * Turns whatever the owner typed into a bare host, or `null` when it cannot be
+ * one. A pasted URL is accepted (`https://example.com/x` → `example.com`), the
+ * case is normalised, and a trailing dot is dropped.
+ *
+ * IPv6 literals are deliberately refused: `links.domain` stores a plain host, and
+ * no such link can exist.
+ */
+function normalizeDomain(value: string): string | null {
+  const input = value.trim().toLowerCase();
+  if (input === "") return null;
+
+  let host = "";
+
+  try {
+    // A scheme-less value is tried as an https URL so `example.com/x` and
+    // `example.com:8443` work; the path is dropped, which is what the owner means.
+    host = HAS_SCHEME.test(input)
+      ? new URL(input).host
+      : new URL(`https://${input}`).host;
+  } catch {
+    return null;
+  }
+
+  host = host.replace(/\.+$/, "");
+  if (host === "" || host.length > MAX_DOMAIN_LENGTH) return null;
+
+  const [hostname, port, ...extra] = host.split(":");
+  if (extra.length > 0) return null;
+  if (hostname === undefined || hostname === "") return null;
+
+  if (port !== undefined) {
+    if (!/^\d{1,5}$/.test(port) || Number(port) > 65535) return null;
+  }
+
+  const labels = hostname.split(".");
+  const validLabels = labels.every(
+    (label) =>
+      label.length > 0 && label.length <= 63 && DOMAIN_LABEL.test(label),
+  );
+  if (!validLabels) return null;
+
+  return port === undefined ? hostname : `${hostname}:${port}`;
+}
+
+const lockedDomainSchema = z.object({ domain: z.string() });
+
+export function parseLockedDomain(raw: unknown): ParseResult<LockedDomainInput> {
+  if (!isPlainObject(raw)) {
+    return { ok: false, message: "payload: must be a JSON object" };
+  }
+
+  const result = lockedDomainSchema.safeParse(raw);
+  if (!result.success) {
+    return { ok: false, message: describeIssue(result.error) };
+  }
+
+  const domain = normalizeDomain(result.data.domain);
+  if (domain === null) {
+    return { ok: false, message: "domain: must be a host name like example.com" };
+  }
+
+  return { ok: true, data: { domain } };
+}
+
+/**
  * The dashboard has no usernames: a single password is the entire credential, so
  * unknown fields are stripped and every other field is ignored. Whitespace is
  * preserved because a password may legitimately contain spaces.
@@ -119,11 +347,32 @@ const loginInputSchema = z.object({
 });
 
 export function parseLoginInput(raw: unknown): ParseResult<LoginInput> {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+  if (!isPlainObject(raw)) {
     return { ok: false, message: "payload: must be a JSON object" };
   }
 
   const result = loginInputSchema.safeParse(raw);
+  if (!result.success) {
+    return { ok: false, message: describeIssue(result.error) };
+  }
+
+  return { ok: true, data: result.data };
+}
+
+/**
+ * The locked-area passcode. Same shape as the dashboard password by design: one
+ * secret, no username, and whitespace preserved because it may contain spaces.
+ */
+const passcodeInputSchema = z.object({
+  passcode: z.string().min(1, "is required"),
+});
+
+export function parsePasscodeInput(raw: unknown): ParseResult<PasscodeInput> {
+  if (!isPlainObject(raw)) {
+    return { ok: false, message: "payload: must be a JSON object" };
+  }
+
+  const result = passcodeInputSchema.safeParse(raw);
   if (!result.success) {
     return { ok: false, message: describeIssue(result.error) };
   }

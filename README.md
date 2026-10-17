@@ -7,11 +7,17 @@ server never scrapes anything and can run entirely on free tiers.
 - **Ingestion:** `POST /api/links` — secret-key protected, no scraping, no Puppeteer.
 - **Dashboard:** `/` — password-protected grid of link cards (thumbnail, title, open button).
   Sign-in is a dedicated page (`/login`) with a single password field, no username.
+- **Link management:** star a link as a favorite, edit its title/URL/thumbnail, delete it, or
+  add one by hand — from the dashboard.
+- **Locked area:** `/locked` — a dark, passcode-protected page where domains can be marked as
+  hidden. Their links disappear from `/` entirely and live only there.
 - **Read API:** `GET /api/links` — secret-key protected JSON.
 - **Stack:** Next.js 16 (App Router) · TypeScript · Tailwind CSS 4 · Drizzle ORM · Turso/libSQL.
 
 Planning and design documents live in [`docs/instant-link-collector/`](docs/instant-link-collector),
-and the login page / navbar work in [`docs/dashboard-login-navbar/`](docs/dashboard-login-navbar).
+the login page / navbar work in [`docs/dashboard-login-navbar/`](docs/dashboard-login-navbar),
+the filter work in [`docs/dashboard-filters/`](docs/dashboard-filters), and the locked area /
+link management in [`docs/locked-domains-and-link-management/`](docs/locked-domains-and-link-management).
 
 ---
 
@@ -45,7 +51,7 @@ and the login page / navbar work in [`docs/dashboard-login-navbar/`](docs/dashbo
 npm install
 ```
 
-Create the local environment file and fill in two secrets:
+Create the local environment file and fill in the secrets:
 
 ```bash
 cp .env.example .env.local
@@ -60,6 +66,8 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 1. Put the first value in `SECRET_KEY` — shared with the userscript.
 2. Put a second, different value (16+ characters) in `DASHBOARD_PASSWORD` — the dashboard
    login password.
+3. Put a third value (16+ characters) in `LOCKED_PASSCODE` — the passcode for the hidden
+   area at `/locked`. It can be any string you can retype, for example a passphrase.
 
 Create the database schema:
 
@@ -78,7 +86,9 @@ npm.cmd run db:migrate
 A database created with `db:push` has no migration history, so `db:migrate` would try to
 recreate the tables it already has. For that case run the statements in
 `drizzle/0001_*.sql` against it directly — they add the column, index it, and backfill every
-existing row.
+existing row. A database created before favorites and locked domains existed needs the same
+treatment for `drizzle/0002_*.sql`, which adds `links.is_favorite` and the `locked_domains`
+table.
 
 Start the app:
 
@@ -98,6 +108,7 @@ field and no browser popup. The session is kept in a signed, `HttpOnly` cookie f
 | `TURSO_AUTH_TOKEN` | production | Required for Turso, empty for local files. |
 | `SECRET_KEY` | yes | 32+ random characters. Used by the API and the userscript. |
 | `DASHBOARD_PASSWORD` | yes | 16+ characters. If unset or shorter, the dashboard returns `503`. |
+| `LOCKED_PASSCODE` | for `/locked` | 16+ characters. If unset or shorter, only `/locked` returns `503`; the rest of the dashboard keeps working. |
 
 `.env.local` is gitignored. Never commit real values.
 
@@ -265,27 +276,81 @@ too short, gated pages answer `503` instead of rendering.
 
 ### Filtering and search
 
-The dashboard list can be narrowed by domain and by free text, and the filter state lives in
-the URL, so a filtered view can be reloaded, bookmarked, and shared.
+The dashboard list can be narrowed by domain, by favorites, and by free text, and the filter
+state lives in the URL, so a filtered view can be reloaded, bookmarked, and shared.
 
 | Parameter | Meaning |
 | --- | --- |
 | `?domain=` | Exact domain match, e.g. `/?domain=www.indoav.com`. Lowercased before it is matched, so `?domain=Example.COM` works. |
 | `?q=` | Case-insensitive substring of the **title** or the **url** (which also covers the domain), e.g. `/?q=hotel`. `%` and `_` are matched literally, not as wildcards. |
+| `?favorite=1` | Only starred links. `1`, `true`, `on`, and `yes` all switch it on; anything else is off. |
 
-Both can be combined (`/?domain=example.com&q=hotel`) and both are optional; an empty or
-whitespace-only value means "no filter". Over-long values are truncated (200 characters for
-the search, 253 for the domain) rather than ignored.
+All three can be combined (`/?domain=example.com&q=hotel&favorite=1`) and all are optional; an
+empty or whitespace-only value means "no filter". Over-long values are truncated (200
+characters for the search, 253 for the domain) rather than ignored.
 
 Filtering and the 100-row cap are one query, so the limit applies to the **filtered** result:
-narrowing the view never hides a match behind the cap. The dropdown is always built from the
-whole table, so an active filter cannot hide the domain you want to switch to, and each
-option carries its link count. The count line reads `4 links` unfiltered and `2 of 5 links`
-while filtering.
+narrowing the view never hides a match behind the cap. The dropdown is always built from
+every domain in scope, so an active filter cannot hide the domain you want to switch to, and
+each option carries its link count. The count line reads `4 links` unfiltered and
+`2 of 5 links` while filtering.
 
 Domains are not parsed out of the URL on every read: `links.domain` is a real column,
 derived once during validation and stored. A re-save rewrites it, so a link saved before the
 column existed repairs itself the next time it is saved.
+
+### Managing links
+
+Every card has three controls: a star (favorite), a pencil (edit), and a trash can (delete).
+
+- **Favorites** toggle in place. A starred card shows a badge over its thumbnail, and the
+  `Favorites` button in the filter bar narrows the grid to starred links.
+- **Edit** opens an inline form for the title, URL, and thumbnail. Changing the URL
+  recomputes the domain, so a link can move between domains — including into or out of the
+  hidden set. A URL that another link already uses is refused (`409`) and nothing changes.
+- **Delete** asks for confirmation inside the card (no browser popup) and is permanent.
+- **Add link** opens a compact form (URL required, title and thumbnail optional); an empty
+  title is derived from the URL, e.g. `example.com/article`. Pasting a URL that is already
+  saved updates that row instead of failing.
+
+### The locked area
+
+`/locked` is a **dark** page behind a second secret. Click the icon-only lock button at the
+right of the filter bar on `/`; without a passcode cookie you land on `/locked/unlock`, which
+asks for `LOCKED_PASSCODE`.
+
+- The page lists **only** links whose domain is locked, with the same filter bar, favorites
+  filter, card actions, and manual add form as `/`.
+- The **Locked domains** panel lists every hidden domain with its link count, and can add or
+  remove one. Locking applies to the domain, so links saved to it later are hidden too.
+- Access lasts **one hour**; `Lock now` ends it immediately. The cookie (`lc_locked`) is
+  `HttpOnly`, `SameSite=Lax`, and signed with the passcode under its own signature context,
+  so a dashboard session can never be used as a passcode (even if both secrets are equal).
+- A locked domain is invisible on `/`: its links are excluded from the list, the search, the
+  dropdown, and the count. Removing it from the panel brings the links straight back.
+
+Unlocking a hidden domain is decided by the passcode, so `LOCKED_PASSCODE` is required for the
+whole page — but `/` and the ingestion API keep working if it is not set.
+
+### Dashboard endpoints
+
+These are called by the dashboard itself and are authenticated by the `lc_session` cookie (not
+`x-secret-key`), so they are same-origin only and send no CORS headers.
+
+| Endpoint | Body | Notes |
+| --- | --- | --- |
+| `POST /api/dashboard/links` | `{ url, title?, thumbnail? }` | Adds a link by hand. `title` falls back to `host + path`. |
+| `PATCH /api/dashboard/links/:id` | any of `{ title, url, thumbnail, isFavorite }` | Edits a link. `409` when the URL belongs to another link, `404` when the link is gone. |
+| `DELETE /api/dashboard/links/:id` | — | Permanent. `404` when there was nothing to delete. |
+| `POST /api/locked/unlock` | `{ passcode }` | Sets `lc_locked` for one hour. |
+| `POST /api/locked/lock` | — | Clears `lc_locked`. |
+| `POST /api/locked/domains` | `{ domain }` | Hides a domain. Accepts a pasted URL and normalises it. |
+| `DELETE /api/locked/domains/:domain` | — | Reveals a domain again. |
+
+The locked endpoints need the session **and** the passcode cookie; the link endpoints need
+only the session. `/api/links` (the userscript API) is unchanged by all of this: it still
+returns every link, hidden or not, because it is already behind `SECRET_KEY` and is a machine
+interface rather than the screen you look at.
 
 ### CORS
 
@@ -312,16 +377,23 @@ applied, so no cloud credentials and no cleanup are required.
 | Test file | Covers |
 | --- | --- |
 | `tests/validation.test.ts` | Payload parsing, normalisation, length caps, limit parameter, derived domain |
+| `tests/link-management-validation.test.ts` | Manual-add payloads (derived title), link patches (≥1 field, no client domain), locked-domain normalisation, passcode payloads |
 | `tests/login-input.test.ts` | Login payload validation (single password, no username) |
 | `tests/auth.test.ts` | Secret-key verification, constant-time comparison, fail-closed behaviour |
-| `tests/session.test.ts` | Session token signing/verification, expiry, tampering, fail-closed |
+| `tests/signed-token.test.ts` | The shared HMAC token: signing/verification, expiry, tampering, fail-closed |
+| `tests/session.test.ts` | The dashboard token: 7-day expiry, and the cookies the login route sets |
+| `tests/locked-session.test.ts` | The passcode token: 1-hour expiry, and that neither token can be replayed in the other's context |
 | `tests/dashboard-auth.test.ts` | Gate decisions and the password check |
+| `tests/locked-auth.test.ts` | `MIN_PASSCODE_LENGTH`, the passcode check, and the locked gate decisions |
 | `tests/auth-routes.test.ts` | Login/logout handlers, cookie attributes, status codes, no cookie on failure |
+| `tests/link-management-routes.test.ts` | Manual add / edit / delete handlers: session gating, derived domain, `404`/`409`, locked links still editable |
+| `tests/locked-routes.test.ts` | Unlock / lock / lock-domain handlers: both cookies required, cookie attributes, idempotency |
 | `tests/proxy.test.ts` | Redirect vs. allow vs. `503`, `?next=` handling, matcher exclusions |
-| `tests/redirect.test.ts` | `?next=` sanitising (open-redirect protection) |
+| `tests/redirect.test.ts` | `?next=` sanitising (open-redirect protection), including the blocked prefixes |
 | `tests/logger.test.ts` | Event shape, domain/IP extraction, serialization safety |
-| `tests/link-filters.test.ts` | `?q=` / `?domain=` normalisation and URL building |
-| `tests/links-repository.test.ts` | Insert vs update, upsert idempotency, concurrent saves, ordering, domain filter, search (incl. escaped `%`/`_`), domain list, counts |
+| `tests/link-filters.test.ts` | `?q=` / `?domain=` / `?favorite=` normalisation, URL building, count formatting |
+| `tests/links-repository.test.ts` | Insert vs update, upsert idempotency, concurrent saves, ordering, scope (visible vs. locked), domain filter, favorite filter, search (incl. escaped `%`/`_`), domain list, counts |
+| `tests/locked-domains-repository.test.ts` | Locking, unlocking, idempotency, and that a locked domain hides its links |
 | `tests/api-links.test.ts` | Full `POST`/`GET`/`OPTIONS` behaviour, status codes, CORS, analytics events |
 | `tests/time.test.ts` | Relative-time formatting boundaries |
 | `tests/userscript.test.ts` | Blacklist rules and metadata extraction, run in a Node `vm` harness |
@@ -352,9 +424,9 @@ rest of the deployment.
 
 1. Push this repository to GitHub.
 2. In Vercel, **Add New → Project** and import the repository.
-3. Under **Settings → Environment Variables**, add all four:
-   `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `SECRET_KEY`, and `DASHBOARD_PASSWORD`
-   (16+ characters).
+3. Under **Settings → Environment Variables**, add all five:
+   `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `SECRET_KEY`, `DASHBOARD_PASSWORD`
+   (16+ characters), and `LOCKED_PASSCODE` (16+ characters) if you use `/locked`.
 4. Apply the schema to the hosted database once, from your machine:
    `TURSO_DATABASE_URL=... TURSO_AUTH_TOKEN=... npm run db:push` (or `db:migrate` if the
    database already exists and you want the data backfills too).
@@ -380,7 +452,18 @@ is met by the serverless function.
   changing `DASHBOARD_PASSWORD` logs every session out immediately.
 - **Login attempts are logged** as structured JSON (`dashboard_login_succeeded`,
   `dashboard_login_failed` with a reason and the client IP), so repeated failures are visible
-  in the host's logs.
+  in the host's logs. Passcode attempts use the same shape (`locked_unlock_succeeded`,
+  `locked_unlock_failed`), so the two are distinguishable in the logs.
+- **The locked area is a second secret**, not a second account. `LOCKED_PASSCODE` is checked
+  the same way as the dashboard password, and its cookie is signed under a separate signature
+  context — so even if both secrets are set to the same value, a dashboard session cannot be
+  replayed as a passcode, and vice versa.
+- **Hidden means hidden by query, not by the interface.** Locked domains are excluded inside
+  the repository SQL, so a locked link cannot leak through the list, the search, the domain
+  dropdown, or the count — there is no code path that forgets to filter.
+- **Link mutations need the dashboard session.** Editing, deleting, and adding links go
+  through session-gated endpoints; changing what is hidden needs the session *and* the
+  passcode. Ids are UUIDs, so they cannot be guessed from outside.
 - **Rotating `SECRET_KEY`** immediately invalidates the userscript; update `CONFIG.SECRET_KEY`
   after rotating. It is separate from the dashboard login, which keeps working.
 - **No scraping.** The dependency tree contains no browser automation or HTML parsing
@@ -397,38 +480,63 @@ src/
   app/
     (app)/                  authenticated pages: navbar layout + dashboard
       layout.tsx            renders the navbar
-      page.tsx              dashboard (password protected, force-dynamic)
+      page.tsx              dashboard: visible links only (password protected, force-dynamic)
     login/
       page.tsx              login page: single password field, no username
       login-form.tsx        client form (POST /api/auth/login)
+    locked/
+      layout.tsx            dark shell for the hidden area (adds the `dark` class)
+      page.tsx              hidden links + locked-domain panel (passcode required)
+      unlock/
+        page.tsx            passcode prompt (redirects straight through when unlocked)
+        unlock-form.tsx     client form (POST /api/locked/unlock)
     api/
-      auth/login/route.ts   creates the session cookie
-      auth/logout/route.ts  clears the session cookie
-      health/route.ts       liveness probe (no auth, no data)
-      links/route.ts        POST + GET + OPTIONS
-    globals.css             Tailwind entry
+      auth/login/route.ts             creates the session cookie
+      auth/logout/route.ts            clears the session cookie
+      dashboard/links/route.ts        POST: add a link by hand (session auth)
+      dashboard/links/[id]/route.ts   PATCH / DELETE: edit, favorite, delete
+      health/route.ts                 liveness probe (no auth, no data)
+      links/route.ts                  POST + GET + OPTIONS (userscript, secret key)
+      locked/unlock/route.ts          POST: exchange the passcode for a 1-hour cookie
+      locked/lock/route.ts            POST: clear the passcode cookie
+      locked/domains/route.ts         POST: hide a domain
+      locked/domains/[domain]/route.ts  DELETE: reveal a domain
+    globals.css             Tailwind entry + the class-based `dark` variant
     layout.tsx              root layout
   components/
+    AddLinkForm.tsx         manual "add link" form
     EmptyState.tsx          onboarding copy when there are no links
+    LinkActions.tsx         star / inline edit / two-step delete
     LinkCard.tsx            thumbnail / title / domain / open button
-    LinkFilters.tsx         domain dropdown + search box, drives the URL
+    LinkFilters.tsx         search + domain + favorites, drives the URL
+    LinkGrid.tsx            the card grid and its "no matches" state
+    LockedDomainsPanel.tsx  list, add, and unlock hidden domains
+    LockedHeader.tsx        locked page heading + "Lock now"
     LogoutButton.tsx        navbar log out control
     Navbar.tsx              top navigation
     NavLinks.tsx            active-aware nav links
     NoMatches.tsx           shown when links exist but none match the filters
+    PasscodeNotConfigured.tsx  shown when LOCKED_PASSCODE is unset or too short
     SetupProblem.tsx        shown when the database is unreachable
   db/
     client.ts               lazy libSQL client + drizzle instance, cached per URL
-    links.ts                upsertLink + listLinks/listDomains/countLinks (the only SQL)
-    schema.ts               links table
+    links.ts                upsertLink + listLinks/listDomains/countLinks/updateLink/deleteLink (the only SQL)
+    locked-domains.ts       listLockedDomains + lockDomain/unlockDomain
+    schema.ts               links + locked_domains tables
   lib/
+    api-auth.ts             session/passcode guards shared by the dashboard endpoints
+    api-response.ts         JSON response builders (ok / 4xx / 5xx)
     auth.ts                 x-secret-key verification (userscript API)
+    dashboard-api.ts        client-side fetch helper for the dashboard endpoints
     dashboard-auth.ts       dashboard password check + gate decision
-    link-filters.ts         ?q= / ?domain= normalisation + URL building
+    link-filters.ts         ?q= / ?domain= / ?favorite= normalisation + URL building
+    locked-auth.ts          passcode check + locked gate decision
+    locked-session.ts       the `lc_locked` token (1 hour)
     logger.ts               structured JSON events
     nav.ts                  navbar items (add a module here)
     redirect.ts             ?next= sanitising (open-redirect protection)
-    session.ts              signed session token: sign + verify
+    session.ts              the `lc_session` token (7 days)
+    signed-token.ts         the HMAC token both cookies are built on
     time.ts                 relative time formatting
     validation.ts           payload + query validation
   proxy.ts                  session gate for the dashboard pages
