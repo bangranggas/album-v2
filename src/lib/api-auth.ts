@@ -1,11 +1,8 @@
 import type { NextResponse } from "next/server";
 
 import { LOCKED_COOKIE_NAME, verifyLockedSession } from "@/lib/locked-session";
-import {
-  isDashboardPasswordConfigured,
-  MIN_PASSWORD_LENGTH,
-} from "@/lib/dashboard-auth";
-import { isLockedPasscodeConfigured, MIN_PASSCODE_LENGTH } from "@/lib/locked-auth";
+import { isDashboardPasswordConfigured } from "@/lib/dashboard-auth";
+import { isLockedPasscodeConfigured } from "@/lib/locked-auth";
 import { jsonError, passcodeRequired, unauthorized } from "@/lib/api-response";
 import { SESSION_COOKIE_NAME, verifySession } from "@/lib/session";
 
@@ -79,7 +76,7 @@ export function requireDashboardSession(
   if (!isDashboardConfigured()) {
     return jsonError(
       "UNCONFIGURED",
-      `Set DASHBOARD_PASSWORD to at least ${MIN_PASSWORD_LENGTH} characters, then restart the server.`,
+      `Set DASHBOARD_PASSWORD, then restart the server.`,
       503,
     );
   }
@@ -99,7 +96,7 @@ export function requireLockedSession(
   if (!isLockedConfigured()) {
     return jsonError(
       "UNCONFIGURED",
-      `Set LOCKED_PASSCODE to at least ${MIN_PASSCODE_LENGTH} characters, then restart the server.`,
+      `Set LOCKED_PASSCODE, then restart the server.`,
       503,
     );
   }

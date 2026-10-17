@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-import {
-  evaluateDashboardGate,
-  MIN_PASSWORD_LENGTH,
-} from "@/lib/dashboard-auth";
+import { evaluateDashboardGate } from "@/lib/dashboard-auth";
 import { SESSION_COOKIE_NAME } from "@/lib/session";
 
 /**
@@ -31,7 +28,7 @@ export function proxy(request: NextRequest): NextResponse | undefined {
 
   if (gate.action === "unconfigured") {
     return new NextResponse(
-      `Dashboard password is not configured. Set DASHBOARD_PASSWORD to at least ${MIN_PASSWORD_LENGTH} characters in the environment, then reload.`,
+      `Dashboard password is not configured. Set DASHBOARD_PASSWORD in the environment, then reload.`,
       {
         status: 503,
         headers: { "content-type": "text/plain; charset=utf-8" },

@@ -198,11 +198,11 @@ describe("dashboard link routes", () => {
     });
 
     it("reports 503 when the dashboard password is not configured", async () => {
-      vi.stubEnv("DASHBOARD_PASSWORD", "short");
+      vi.stubEnv("DASHBOARD_PASSWORD", "");
 
       const response = await POST(
         jsonRequest("https://app.test/api/dashboard/links", "POST", {
-          cookies: [validSessionCookie("short")],
+          cookies: [validSessionCookie()],
           body: created,
         }),
       );

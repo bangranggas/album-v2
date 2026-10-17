@@ -2,10 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { LoginForm } from "./login-form";
-import {
-  isDashboardPasswordConfigured,
-  MIN_PASSWORD_LENGTH,
-} from "@/lib/dashboard-auth";
+import { isDashboardPasswordConfigured } from "@/lib/dashboard-auth";
 import { resolveNextPath } from "@/lib/redirect";
 import { SESSION_COOKIE_NAME, verifySession } from "@/lib/session";
 
@@ -74,7 +71,7 @@ export default async function LoginPage({
             <code className="rounded bg-white/60 px-1 py-0.5 text-xs">
               DASHBOARD_PASSWORD
             </code>{" "}
-            to at least {MIN_PASSWORD_LENGTH} characters in{" "}
+            in{" "}
             <code className="rounded bg-white/60 px-1 py-0.5 text-xs">
               .env.local
             </code>

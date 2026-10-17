@@ -2,13 +2,6 @@ import { constantTimeEqual } from "@/lib/auth";
 import { verifyLockedSession } from "@/lib/locked-session";
 
 /**
- * A passcode shorter than this is treated as unconfigured, matching the rule for
- * the dashboard password: a placeholder like `1234` can never accidentally
- * protect (or unlock) the hidden area.
- */
-export const MIN_PASSCODE_LENGTH = 16;
-
-/**
  * Outcome of checking a request against the locked-area session. Split from the
  * HTTP response so the decision is unit-testable without Next.js.
  *
@@ -21,10 +14,16 @@ export type LockedGate =
   | { action: "prompt" }
   | { action: "unconfigured" };
 
+/**
+ * Any non-blank value counts as configured — there is no minimum length, matching
+ * the rule for the dashboard password. A missing or whitespace-only value still
+ * counts as unconfigured and fails closed, so a blank variable can never protect
+ * (or unlock) the hidden area.
+ */
 export function isLockedPasscodeConfigured(
   passcode: string | undefined,
 ): passcode is string {
-  return typeof passcode === "string" && passcode.length >= MIN_PASSCODE_LENGTH;
+  return typeof passcode === "string" && passcode.trim() !== "";
 }
 
 /**

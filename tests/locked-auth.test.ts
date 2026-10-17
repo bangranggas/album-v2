@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateLockedGate,
   isLockedPasscodeConfigured,
-  MIN_PASSCODE_LENGTH,
   verifyLockedPasscode,
 } from "@/lib/locked-auth";
 import { signLockedSession } from "@/lib/locked-session";
@@ -13,20 +12,15 @@ const PASSCODE = "correct-horse-battery-staple";
 const NOW = Date.parse("2026-10-18T00:00:00.000Z");
 
 describe("isLockedPasscodeConfigured", () => {
-  it("requires the same minimum length as the dashboard password", () => {
-    expect(MIN_PASSCODE_LENGTH).toBe(16);
-  });
-
-  it("rejects an unset, empty, or too-short passcode", () => {
+  it("rejects an unset, empty, or blank passcode", () => {
     expect(isLockedPasscodeConfigured(undefined)).toBe(false);
     expect(isLockedPasscodeConfigured("")).toBe(false);
-    expect(isLockedPasscodeConfigured("a".repeat(MIN_PASSCODE_LENGTH - 1))).toBe(
-      false,
-    );
+    expect(isLockedPasscodeConfigured("   ")).toBe(false);
   });
 
-  it("accepts one at exactly the minimum length", () => {
-    expect(isLockedPasscodeConfigured("a".repeat(MIN_PASSCODE_LENGTH))).toBe(true);
+  it("accepts a short passcode, like the dashboard password", () => {
+    expect(isLockedPasscodeConfigured("1234")).toBe(true);
+    expect(isLockedPasscodeConfigured("a")).toBe(true);
   });
 });
 
@@ -43,6 +37,11 @@ describe("verifyLockedPasscode", () => {
   it("fails closed when nothing is configured", () => {
     expect(verifyLockedPasscode(PASSCODE, undefined)).toBe(false);
     expect(verifyLockedPasscode("", undefined)).toBe(false);
+    expect(verifyLockedPasscode("", "")).toBe(false);
+  });
+
+  it("accepts a short configured passcode", () => {
+    expect(verifyLockedPasscode("1234", "1234")).toBe(true);
   });
 });
 

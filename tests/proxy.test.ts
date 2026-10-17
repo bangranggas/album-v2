@@ -102,10 +102,12 @@ describe("proxy gate", () => {
     expect(response?.headers.get("location")).toBeNull();
   });
 
-  it("fails closed when the configured password is too short", () => {
+  it("accepts a short configured password", () => {
     vi.stubEnv("DASHBOARD_PASSWORD", "short");
 
-    expect(proxy(request("/"))?.status).toBe(503);
+    const token = signSession({ now: NOW, secret: "short" });
+
+    expect(proxy(request("/", { token }))).toBeUndefined();
   });
 });
 

@@ -64,10 +64,12 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
 1. Put the first value in `SECRET_KEY` — shared with the userscript.
-2. Put a second, different value (16+ characters) in `DASHBOARD_PASSWORD` — the dashboard
-   login password.
-3. Put a third value (16+ characters) in `LOCKED_PASSCODE` — the passcode for the hidden
-   area at `/locked`. It can be any string you can retype, for example a passphrase.
+2. Put a second, different value in `DASHBOARD_PASSWORD` — the dashboard login password.
+3. Put a third value in `LOCKED_PASSCODE` — the passcode for the hidden area at `/locked`.
+   It can be any string you can retype, for example a passphrase.
+
+`DASHBOARD_PASSWORD` and `LOCKED_PASSCODE` have no minimum length: any non-blank value works.
+A long random one is still the safest choice, especially over the public internet.
 
 Create the database schema:
 
@@ -107,8 +109,8 @@ field and no browser popup. The session is kept in a signed, `HttpOnly` cookie f
 | `TURSO_DATABASE_URL` | yes | `file:./local.db` locally, `libsql://<db>-<org>.turso.io` in production. |
 | `TURSO_AUTH_TOKEN` | production | Required for Turso, empty for local files. |
 | `SECRET_KEY` | yes | 32+ random characters. Used by the API and the userscript. |
-| `DASHBOARD_PASSWORD` | yes | 16+ characters. If unset or shorter, the dashboard returns `503`. |
-| `LOCKED_PASSCODE` | for `/locked` | 16+ characters. If unset or shorter, only `/locked` returns `503`; the rest of the dashboard keeps working. |
+| `DASHBOARD_PASSWORD` | yes | Any non-blank value. If unset or blank, the dashboard returns `503`. |
+| `LOCKED_PASSCODE` | for `/locked` | Any non-blank value. If unset or blank, only `/locked` returns `503`; the rest of the dashboard keeps working. |
 
 `.env.local` is gitignored. Never commit real values.
 
@@ -256,7 +258,7 @@ shared password is the entire credential.
 | 200 | Password accepted. Sets the `lc_session` cookie: `HttpOnly`, `SameSite=Lax`, `Path=/`, 7 days, `Secure` in production. |
 | 400 | `INVALID_JSON`, or `VALIDATION_ERROR` when `password` is missing/empty. No cookie is set. |
 | 401 | `UNAUTHORIZED` — wrong password. No cookie is set. |
-| 503 | `UNCONFIGURED` — `DASHBOARD_PASSWORD` is missing or shorter than 16 characters. |
+| 503 | `UNCONFIGURED` — `DASHBOARD_PASSWORD` is missing or blank. |
 
 The cookie holds only an expiry and an HMAC signature (signed with the dashboard password);
 the password itself is never stored in it. That also means changing `DASHBOARD_PASSWORD`
@@ -272,7 +274,7 @@ stateless, so there is nothing else to clean up.
 Everything except `/login` and `/api/*` requires the `lc_session` cookie. Without it you are
 redirected to `/login?next=<the page you asked for>`; `?next=` is sanitised, so it can only
 ever point at a path on this site (no open redirect). While `DASHBOARD_PASSWORD` is unset or
-too short, gated pages answer `503` instead of rendering.
+blank, gated pages answer `503` instead of rendering.
 
 ### Filtering and search
 
@@ -384,7 +386,7 @@ applied, so no cloud credentials and no cleanup are required.
 | `tests/session.test.ts` | The dashboard token: 7-day expiry, and the cookies the login route sets |
 | `tests/locked-session.test.ts` | The passcode token: 1-hour expiry, and that neither token can be replayed in the other's context |
 | `tests/dashboard-auth.test.ts` | Gate decisions and the password check |
-| `tests/locked-auth.test.ts` | `MIN_PASSCODE_LENGTH`, the passcode check, and the locked gate decisions |
+| `tests/locked-auth.test.ts` | The passcode check (blank ⇒ unconfigured) and the locked gate decisions |
 | `tests/auth-routes.test.ts` | Login/logout handlers, cookie attributes, status codes, no cookie on failure |
 | `tests/link-management-routes.test.ts` | Manual add / edit / delete handlers: session gating, derived domain, `404`/`409`, locked links still editable |
 | `tests/locked-routes.test.ts` | Unlock / lock / lock-domain handlers: both cookies required, cookie attributes, idempotency |
@@ -425,8 +427,8 @@ rest of the deployment.
 1. Push this repository to GitHub.
 2. In Vercel, **Add New → Project** and import the repository.
 3. Under **Settings → Environment Variables**, add all five:
-   `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `SECRET_KEY`, `DASHBOARD_PASSWORD`
-   (16+ characters), and `LOCKED_PASSCODE` (16+ characters) if you use `/locked`.
+   `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `SECRET_KEY`, `DASHBOARD_PASSWORD`,
+   and `LOCKED_PASSCODE` if you use `/locked`.
 4. Apply the schema to the hosted database once, from your machine:
    `TURSO_DATABASE_URL=... TURSO_AUTH_TOKEN=... npm run db:push` (or `db:migrate` if the
    database already exists and you want the data backfills too).
@@ -445,8 +447,8 @@ is met by the serverless function.
 ## 9. Security notes
 
 - **The dashboard password is a shared secret**, not user accounts. Anything it protects is
-  only as strong as `DASHBOARD_PASSWORD`. Use 16+ random characters and always serve over
-  HTTPS (Vercel does).
+  only as strong as `DASHBOARD_PASSWORD`. There is no minimum length, so use a long random
+  value anyway, and always serve over HTTPS (Vercel does).
 - **The session cookie is stateless and signed**, not encrypted, and contains no password —
   only an expiry and an HMAC of it. Forging one requires the dashboard password, and
   changing `DASHBOARD_PASSWORD` logs every session out immediately.
@@ -516,7 +518,7 @@ src/
     Navbar.tsx              top navigation
     NavLinks.tsx            active-aware nav links
     NoMatches.tsx           shown when links exist but none match the filters
-    PasscodeNotConfigured.tsx  shown when LOCKED_PASSCODE is unset or too short
+    PasscodeNotConfigured.tsx  shown when LOCKED_PASSCODE is unset or blank
     SetupProblem.tsx        shown when the database is unreachable
   db/
     client.ts               lazy libSQL client + drizzle instance, cached per URL

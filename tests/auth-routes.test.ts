@@ -169,12 +169,13 @@ describe("POST /api/auth/login", () => {
     expect(loggedEvents(console_.error)).toContain("dashboard_login_failed");
   });
 
-  it("reports 503 when the configured password is too short", async () => {
+  it("accepts a short configured password", async () => {
     vi.stubEnv("DASHBOARD_PASSWORD", "short");
 
     const response = await login(loginRequest({ password: "short" }));
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(200);
+    expect(sessionCookieValue(response)).not.toBeNull();
   });
 });
 

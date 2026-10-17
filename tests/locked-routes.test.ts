@@ -187,12 +187,13 @@ describe("locked area routes", () => {
       });
     });
 
-    it("treats a too-short passcode as unconfigured", async () => {
+    it("accepts a short configured passcode", async () => {
       vi.stubEnv("LOCKED_PASSCODE", SHORT_PASSCODE);
 
       const response = await unlock(request({ passcode: SHORT_PASSCODE }));
 
-      expect(response.status).toBe(503);
+      expect(response.status).toBe(200);
+      expect(cookieValue(response, LOCKED_COOKIE_NAME)).not.toBeNull();
     });
   });
 

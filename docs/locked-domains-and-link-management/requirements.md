@@ -168,7 +168,7 @@ show a locked link:
     will appear on `/`.
 15. Invalid manual input (a relative URL, an empty URL, a too-long field) is rejected with a
     message, and nothing is written.
-16. `LOCKED_PASSCODE` unset or too short: `/locked` returns `503` and the passcode prompt
+16. `LOCKED_PASSCODE` unset or blank: `/locked` returns `503` and the passcode prompt
     explains it — the unlocked dashboard keeps working normally.
 17. A tampered or expired `lc_locked` cookie is rejected; a valid `lc_session` cookie alone
     never grants access to `/locked`.
@@ -197,3 +197,22 @@ show a locked link:
 - **A very long title/url in the inline editor** → capped by the same validation as the API.
 - **Passcode brute force** → failed attempts are logged (`locked_unlock_failed`) with the
   client IP, like the dashboard login.
+
+---
+
+## 8. Amendment — 2026-10-18 (no minimum length for the two secrets)
+
+Requested by the owner: *"hilangkan requirement passcode dan login password untuk minimal 16
+karakter. Tolong buat bebas saja."* Both `DASHBOARD_PASSWORD` and `LOCKED_PASSCODE` may now be
+any value; the 16-character minimum is gone.
+
+| # | Amended rule |
+| --- | --- |
+| A1 | `MIN_PASSWORD_LENGTH` and `MIN_PASSCODE_LENGTH` no longer exist. |
+| A2 | "Configured" means *not blank*: `undefined`, `""`, and a whitespace-only value are still unconfigured and keep answering `503`. Everything else — one character upwards — is accepted. |
+| A3 | The `503` messages no longer mention a length. |
+| A4 | Nothing else changes: both secrets are still compared in constant time over the raw value (spaces stay significant), the cookies keep their signature contexts and TTLs, and the `503` bodies/status codes are the same. |
+
+Supersedes decision D7 of `docs/dashboard-login-navbar/requirements.md` and decision 2 of the
+feature's architecture plan (§8 there); implementation note 14 in that plan records the change.
+A long random value is still the recommended choice, and the README says so.

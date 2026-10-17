@@ -9,7 +9,6 @@ import {
 } from "@/lib/api-response";
 import {
   isLockedPasscodeConfigured,
-  MIN_PASSCODE_LENGTH,
   verifyLockedPasscode,
 } from "@/lib/locked-auth";
 import {
@@ -49,7 +48,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     return jsonError(
       "UNCONFIGURED",
-      `Set LOCKED_PASSCODE to at least ${MIN_PASSCODE_LENGTH} characters, then restart the server.`,
+      `Set LOCKED_PASSCODE, then restart the server.`,
       503,
     );
   }

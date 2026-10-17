@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateDashboardGate,
   isDashboardPasswordConfigured,
-  MIN_PASSWORD_LENGTH,
   verifyDashboardPassword,
 } from "@/lib/dashboard-auth";
 import { SESSION_TTL_MS, signSession } from "@/lib/session";
@@ -24,16 +23,13 @@ describe("isDashboardPasswordConfigured", () => {
     expect(isDashboardPasswordConfigured("")).toBe(false);
   });
 
-  it("rejects a password shorter than the minimum", () => {
-    expect(
-      isDashboardPasswordConfigured("a".repeat(MIN_PASSWORD_LENGTH - 1)),
-    ).toBe(false);
+  it("rejects a blank password", () => {
+    expect(isDashboardPasswordConfigured("   ")).toBe(false);
   });
 
-  it("accepts a password at the minimum length", () => {
-    expect(
-      isDashboardPasswordConfigured("a".repeat(MIN_PASSWORD_LENGTH)),
-    ).toBe(true);
+  it("accepts a short password", () => {
+    expect(isDashboardPasswordConfigured("a")).toBe(true);
+    expect(isDashboardPasswordConfigured("short")).toBe(true);
   });
 });
 
@@ -61,10 +57,14 @@ describe("verifyDashboardPassword", () => {
     expect(verifyDashboardPassword(withSpaces, withSpaces)).toBe(true);
   });
 
-  it("fails closed when the configured password is missing or too short", () => {
+  it("fails closed when the configured password is missing or blank", () => {
     expect(verifyDashboardPassword("anything", undefined)).toBe(false);
     expect(verifyDashboardPassword("", "")).toBe(false);
-    expect(verifyDashboardPassword("short", "short")).toBe(false);
+    expect(verifyDashboardPassword("   ", "   ")).toBe(false);
+  });
+
+  it("accepts a short configured password", () => {
+    expect(verifyDashboardPassword("short", "short")).toBe(true);
   });
 });
 
@@ -151,13 +151,13 @@ describe("evaluateDashboardGate", () => {
     ).toEqual({ action: "unconfigured" });
   });
 
-  it("reports unconfigured when the configured password is too short", () => {
+  it("allows a visitor whose short password is configured", () => {
     expect(
       evaluateDashboardGate({
         sessionToken: validToken("short"),
         configuredPassword: "short",
         now: NOW,
       }),
-    ).toEqual({ action: "unconfigured" });
+    ).toEqual({ action: "allow" });
   });
 });

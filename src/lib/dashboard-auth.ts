@@ -2,12 +2,6 @@ import { constantTimeEqual } from "@/lib/auth";
 import { verifySession } from "@/lib/session";
 
 /**
- * A password shorter than this is treated as unconfigured, so a placeholder like
- * `changeme` can never accidentally protect (or unlock) the dashboard.
- */
-export const MIN_PASSWORD_LENGTH = 16;
-
-/**
  * Outcome of checking a request against the dashboard session. Split from the
  * HTTP response so the decision logic is unit-testable without Next.js.
  *
@@ -20,10 +14,16 @@ export type DashboardGate =
   | { action: "redirect" }
   | { action: "unconfigured" };
 
+/**
+ * Any non-blank value counts as configured — there is no minimum length, so a
+ * short password you can retype is fine. A missing or whitespace-only value still
+ * counts as unconfigured and fails closed, so a blank variable can never protect
+ * (or unlock) the dashboard.
+ */
 export function isDashboardPasswordConfigured(
   password: string | undefined,
 ): password is string {
-  return typeof password === "string" && password.length >= MIN_PASSWORD_LENGTH;
+  return typeof password === "string" && password.trim() !== "";
 }
 
 /**

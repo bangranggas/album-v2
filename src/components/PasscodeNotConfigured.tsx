@@ -1,8 +1,6 @@
-import { MIN_PASSCODE_LENGTH } from "@/lib/locked-auth";
-
 /**
- * Shown instead of the passcode form when `LOCKED_PASSCODE` is missing or too
- * short. The light dashboard keeps working; only the hidden area is closed.
+ * Shown instead of the passcode form when `LOCKED_PASSCODE` is missing or blank.
+ * The light dashboard keeps working; only the hidden area is closed.
  */
 export function PasscodeNotConfigured() {
   return (
@@ -16,11 +14,10 @@ export function PasscodeNotConfigured() {
         <code className="rounded bg-amber-100 px-1 py-0.5 text-xs dark:bg-amber-900">
           LOCKED_PASSCODE
         </code>{" "}
-        to at least {MIN_PASSCODE_LENGTH} characters in <code>.env.local</code>, then
-        restart the server.
+        in <code>.env.local</code>, then restart the server.
       </p>
       <p className="mt-2">
-        Generate one with{" "}
+        Generate a strong one with{" "}
         <code className="rounded bg-amber-100 px-1 py-0.5 text-xs dark:bg-amber-900">
           node -e &quot;console.log(require(&apos;crypto&apos;).randomBytes(24).toString(&apos;base64url&apos;))&quot;
         </code>

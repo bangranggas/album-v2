@@ -89,7 +89,7 @@ empty (nothing is hidden until the owner says so).
 
 | Name | Rule |
 | --- | --- |
-| `LOCKED_PASSCODE` | Required for the locked area. Same 16-character minimum as `DASHBOARD_PASSWORD`; shorter or missing → `/locked` answers `503`. |
+| `LOCKED_PASSCODE` | Required for the locked area. Any non-blank value (no minimum length); missing or blank → `/locked` answers `503`. |
 
 ### 3.3 Cookies
 
@@ -166,7 +166,7 @@ fields, and `toApiLink` is the single mapper).
 | --- | --- |
 | `src/lib/signed-token.ts` | Context-parameterised `signToken` / `verifyToken` |
 | `src/lib/locked-session.ts` | `LOCKED_COOKIE_NAME`, `LOCKED_TTL_MS`, sign/verify |
-| `src/lib/locked-auth.ts` | `MIN_PASSCODE_LENGTH`, `isLockedPasscodeConfigured`, `verifyLockedPasscode`, `evaluateLockedGate` |
+| `src/lib/locked-auth.ts` | `isLockedPasscodeConfigured`, `verifyLockedPasscode`, `evaluateLockedGate` |
 | `src/lib/api-auth.ts` | `hasDashboardSession(request)`, `hasLockedSession(request)` |
 | `src/lib/api-response.ts` | `jsonResponse`, `unauthorized`, `notFound`, `conflict`, `unconfigured` |
 | `src/db/locked-domains.ts` | Locked-domain CRUD + counts |
@@ -252,6 +252,14 @@ in the filter bar, as requested), `src/app/api/links/route.ts`, `src/types` CORS
 13. **Error-log events are paired with success events** (`dashboard_link_created` vs.
     `dashboard_link_create_failed`, and so on) so a failed mutation is visible in the logs
     without having to infer it from an absent success line.
+14. **The minimum length for both secrets was removed at the owner's request** (2026-10-18):
+    `MIN_PASSWORD_LENGTH` and `MIN_PASSCODE_LENGTH` are gone, and `isDashboardPasswordConfigured`
+    / `isLockedPasscodeConfigured` now accept any value that is not blank (a whitespace-only
+    value still counts as unconfigured, so a stray empty-looking variable cannot lock the app
+    in or, worse, act as a credential). Everything else is unchanged: blank or missing ⇒ `503`,
+    and the `503` messages no longer quote a length. Passwords and passcodes are still compared
+    in constant time over the raw value, so leading/trailing spaces stay significant. This
+    supersedes decision 2 in §8.
 
 ---
 
@@ -301,10 +309,10 @@ checkpoints.
    requires `SECRET_KEY` and is machine access, not the interface you look at; hiding would
    also mean the userscript's own reads change. Say the word if you want it to hide them too
    (`?include_locked=1` to opt back in).
-2. **`LOCKED_PASSCODE` must be at least 16 characters**, the same rule as the dashboard
-   password, so a 6-digit PIN is rejected with a `503`. Consistency and safety won; tell me if
-   you would rather have a short numeric PIN (I would then lower the minimum to 8 and stop
-   calling it equivalent to a password).
+2. ~~**`LOCKED_PASSCODE` must be at least 16 characters**~~ — **superseded on 2026-10-18**: the
+   owner asked for the minimum to be dropped, so both secrets now accept any non-blank value
+   (see §5 note 14). Short values are still allowed but are weaker; a long passphrase remains
+   the recommended choice.
 3. **Locking/unlocking (the policy) needs both secrets; editing a link needs only the
    dashboard session.** Link ids are UUIDs and are only discoverable after unlocking, so write
    access adds no exposure, and the locked page reuses the same edit/delete endpoints as `/`.

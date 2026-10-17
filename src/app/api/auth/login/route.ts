@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 
 import {
   isDashboardPasswordConfigured,
-  MIN_PASSWORD_LENGTH,
   verifyDashboardPassword,
 } from "@/lib/dashboard-auth";
 import { extractIp, logEvent } from "@/lib/logger";
@@ -34,7 +33,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json(
       apiError(
         "UNCONFIGURED",
-        `Set DASHBOARD_PASSWORD to at least ${MIN_PASSWORD_LENGTH} characters, then restart the server.`,
+        `Set DASHBOARD_PASSWORD, then restart the server.`,
       ),
       { status: 503 },
     );
