@@ -15,6 +15,10 @@ export interface LinkInput {
   thumbnail: string | null;
 }
 
+export interface LoginInput {
+  password: string;
+}
+
 function isHttpUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
@@ -87,6 +91,28 @@ export function parseLinkInput(raw: unknown): ParseResult<LinkInput> {
   }
 
   const result = linkInputSchema.safeParse(raw);
+  if (!result.success) {
+    return { ok: false, message: describeIssue(result.error) };
+  }
+
+  return { ok: true, data: result.data };
+}
+
+/**
+ * The dashboard has no usernames: a single password is the entire credential, so
+ * unknown fields are stripped and every other field is ignored. Whitespace is
+ * preserved because a password may legitimately contain spaces.
+ */
+const loginInputSchema = z.object({
+  password: z.string().min(1, "is required"),
+});
+
+export function parseLoginInput(raw: unknown): ParseResult<LoginInput> {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { ok: false, message: "payload: must be a JSON object" };
+  }
+
+  const result = loginInputSchema.safeParse(raw);
   if (!result.success) {
     return { ok: false, message: describeIssue(result.error) };
   }

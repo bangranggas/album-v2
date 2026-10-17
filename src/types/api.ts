@@ -4,7 +4,8 @@ export type ApiErrorCode =
   | "UNAUTHORIZED"
   | "INVALID_JSON"
   | "VALIDATION_ERROR"
-  | "INTERNAL_ERROR";
+  | "INTERNAL_ERROR"
+  | "UNCONFIGURED";
 
 export interface ApiErrorBody {
   ok: false;

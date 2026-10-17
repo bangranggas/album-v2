@@ -6,10 +6,12 @@ server never scrapes anything and can run entirely on free tiers.
 
 - **Ingestion:** `POST /api/links` — secret-key protected, no scraping, no Puppeteer.
 - **Dashboard:** `/` — password-protected grid of link cards (thumbnail, title, open button).
+  Sign-in is a dedicated page (`/login`) with a single password field, no username.
 - **Read API:** `GET /api/links` — secret-key protected JSON.
 - **Stack:** Next.js 16 (App Router) · TypeScript · Tailwind CSS 4 · Drizzle ORM · Turso/libSQL.
 
-Planning and design documents live in [`docs/instant-link-collector/`](docs/instant-link-collector).
+Planning and design documents live in [`docs/instant-link-collector/`](docs/instant-link-collector),
+and the login page / navbar work in [`docs/dashboard-login-navbar/`](docs/dashboard-login-navbar).
 
 ---
 
@@ -71,8 +73,9 @@ Start the app:
 npm.cmd run dev
 ```
 
-Open `http://localhost:4200` and log in with `DASHBOARD_PASSWORD`. The browser's native
-password prompt appears; the username is ignored.
+Open `http://localhost:4200`. You are redirected to the login page at `/login`, which asks
+for a single password — enter the value of `DASHBOARD_PASSWORD`. There is no username
+field and no browser popup. The session is kept in a signed, `HttpOnly` cookie for 7 days.
 
 ### Environment variables
 
@@ -87,7 +90,69 @@ password prompt appears; the username is ignored.
 
 ---
 
-## 3. Installing the userscript
+## 3. Setting up Turso
+
+The app stores links in a **Turso** (libSQL) database. Local development uses a plain file
+(`file:./local.db`), so you only need this section when you want a hosted database — for
+example before deploying. It takes about five minutes, and the free tier is enough.
+
+### 3.1 Create the database
+
+1. Go to <https://turso.tech> and sign up (GitHub sign-in works).
+2. In the dashboard, click **Create Database**.
+3. Give it a name (for example `link-collector`) and pick the region closest to you.
+4. Open the new database and use **Connect** / **Copy URL** to reveal the credentials.
+
+### 3.2 Note the two values
+
+| Value | Looks like | Goes into |
+| --- | --- | --- |
+| Database URL | `libsql://link-collector-yourname.turso.io` | `TURSO_DATABASE_URL` |
+| Auth token | a long `eyJhbGciOi...` JWT string | `TURSO_AUTH_TOKEN` |
+
+> The auth token grants full access to the database. Treat it like a password: keep it in
+> `.env.local` and in your host's environment settings, never in the repository.
+
+### 3.3 Point the app at it
+
+Edit `.env.local`:
+
+```bash
+TURSO_DATABASE_URL="libsql://link-collector-yourname.turso.io"
+TURSO_AUTH_TOKEN="eyJhbGciOi..."
+```
+
+Create the tables in the hosted database, then restart the dev server:
+
+```bash
+npm.cmd run db:push
+npm.cmd run dev
+```
+
+### 3.4 CLI alternative
+
+If you prefer the terminal, the Turso CLI does the same thing:
+
+```bash
+# install: https://docs.turso.tech/cli/installation
+turso auth login
+turso db create link-collector
+turso db show link-collector --url        # -> TURSO_DATABASE_URL
+turso db tokens create link-collector     # -> TURSO_AUTH_TOKEN
+```
+
+### 3.5 Troubleshooting
+
+| Symptom | Cause and fix |
+| --- | --- |
+| `TURSO_DATABASE_URL is not set` | No `.env.local` (or the variable is blank). Copy `.env.example` and fill it in. |
+| `The link database is not reachable` on the dashboard | The URL/token pair is wrong, or the tables do not exist yet. Re-check both values, then run `npm run db:push`. |
+| `authentication error` / `401` from libSQL | `TURSO_AUTH_TOKEN` is wrong, expired, or belongs to a different database. Create a fresh token. |
+| Works locally, `500` in production | The environment variables were not added in the host's dashboard. See §8. |
+
+---
+
+## 4. Installing the userscript
 
 1. Open Tampermonkey → **Create a new script**.
 2. Replace the template with the contents of
@@ -126,7 +191,7 @@ covers its subdomains). Extend these lists as needed — no other code has to ch
 
 ---
 
-## 4. API reference
+## 5. API reference
 
 ### `POST /api/links`
 
@@ -157,6 +222,34 @@ saved first. `limit` accepts 1–200 and defaults to 100.
 
 Open, no auth. Returns `{ ok: true }` and nothing else.
 
+### `POST /api/auth/login`
+
+The dashboard login. Body: `{ "password": "..." }`. There is **no username field** — one
+shared password is the entire credential.
+
+| Status | Meaning |
+| --- | --- |
+| 200 | Password accepted. Sets the `lc_session` cookie: `HttpOnly`, `SameSite=Lax`, `Path=/`, 7 days, `Secure` in production. |
+| 400 | `INVALID_JSON`, or `VALIDATION_ERROR` when `password` is missing/empty. No cookie is set. |
+| 401 | `UNAUTHORIZED` — wrong password. No cookie is set. |
+| 503 | `UNCONFIGURED` — `DASHBOARD_PASSWORD` is missing or shorter than 16 characters. |
+
+The cookie holds only an expiry and an HMAC signature (signed with the dashboard password);
+the password itself is never stored in it. That also means changing `DASHBOARD_PASSWORD`
+invalidates every existing session.
+
+### `POST /api/auth/logout`
+
+Clears the `lc_session` cookie (`Max-Age=0`) and returns `{ ok: true }`. Sessions are
+stateless, so there is nothing else to clean up.
+
+### Dashboard pages
+
+Everything except `/login` and `/api/*` requires the `lc_session` cookie. Without it you are
+redirected to `/login?next=<the page you asked for>`; `?next=` is sanitised, so it can only
+ever point at a path on this site (no open redirect). While `DASHBOARD_PASSWORD` is unset or
+too short, gated pages answer `503` instead of rendering.
+
 ### CORS
 
 The API answers the `OPTIONS` preflight and sends
@@ -167,7 +260,7 @@ endpoint reads no cookies or ambient credentials, and every operation needs the 
 
 ---
 
-## 5. Testing
+## 6. Testing
 
 Tests are plain Vitest scripts and are meant to be run manually:
 
@@ -182,18 +275,23 @@ applied, so no cloud credentials and no cleanup are required.
 | Test file | Covers |
 | --- | --- |
 | `tests/validation.test.ts` | Payload parsing, normalisation, length caps, limit parameter |
+| `tests/login-input.test.ts` | Login payload validation (single password, no username) |
 | `tests/auth.test.ts` | Secret-key verification, constant-time comparison, fail-closed behaviour |
+| `tests/session.test.ts` | Session token signing/verification, expiry, tampering, fail-closed |
+| `tests/dashboard-auth.test.ts` | Gate decisions and the password check |
+| `tests/auth-routes.test.ts` | Login/logout handlers, cookie attributes, status codes, no cookie on failure |
+| `tests/proxy.test.ts` | Redirect vs. allow vs. `503`, `?next=` handling, matcher exclusions |
+| `tests/redirect.test.ts` | `?next=` sanitising (open-redirect protection) |
 | `tests/logger.test.ts` | Event shape, domain/IP extraction, serialization safety |
 | `tests/links-repository.test.ts` | Insert vs update, upsert idempotency, concurrent saves, ordering |
 | `tests/api-links.test.ts` | Full `POST`/`GET`/`OPTIONS` behaviour, status codes, CORS, analytics events |
-| `tests/basic-auth.test.ts` | Basic-auth parsing and the dashboard gate decision |
 | `tests/time.test.ts` | Relative-time formatting boundaries |
 | `tests/userscript.test.ts` | Blacklist rules and metadata extraction, run in a Node `vm` harness |
 | `tests/test-db-helper.test.ts` | Migration application and the unique index on `url` |
 
 ---
 
-## 6. Scripts
+## 7. Scripts
 
 | Script | What it does |
 | --- | --- |
@@ -208,14 +306,23 @@ applied, so no cloud credentials and no cleanup are required.
 
 ---
 
-## 7. Deploying
+## 8. Deploying
 
-1. Create a Turso database and copy its URL and auth token.
-2. Push the schema:
+Setting up the hosted database is covered in [§3](#3-setting-up-turso); this section is the
+rest of the deployment.
+
+1. Push this repository to GitHub.
+2. In Vercel, **Add New → Project** and import the repository.
+3. Under **Settings → Environment Variables**, add all four:
+   `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `SECRET_KEY`, and `DASHBOARD_PASSWORD`
+   (16+ characters).
+4. Apply the schema to the hosted database once, from your machine:
    `TURSO_DATABASE_URL=... TURSO_AUTH_TOKEN=... npm run db:push`
-3. Import the repository into Vercel and set `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`,
-   `SECRET_KEY`, and `DASHBOARD_PASSWORD` as environment variables.
-4. Update `CONFIG.API_BASE_URL` in your local userscript copy to the Vercel URL.
+5. Deploy, open the deployment, and log in at `/login`.
+6. Point `CONFIG.API_BASE_URL` in your local userscript copy at the deployment URL.
+
+Always serve over HTTPS: the login sends the password over the wire, and the session cookie
+is only marked `Secure` in production.
 
 The app uses Node.js serverless functions. Next.js 16 deprecates the Edge Runtime, so no
 `runtime` export is set, and the PRD's "Edge Runtime **or** Serverless function" requirement
@@ -223,13 +330,19 @@ is met by the serverless function.
 
 ---
 
-## 8. Security notes
+## 9. Security notes
 
 - **The dashboard password is a shared secret**, not user accounts. Anything it protects is
   only as strong as `DASHBOARD_PASSWORD`. Use 16+ random characters and always serve over
   HTTPS (Vercel does).
+- **The session cookie is stateless and signed**, not encrypted, and contains no password —
+  only an expiry and an HMAC of it. Forging one requires the dashboard password, and
+  changing `DASHBOARD_PASSWORD` logs every session out immediately.
+- **Login attempts are logged** as structured JSON (`dashboard_login_succeeded`,
+  `dashboard_login_failed` with a reason and the client IP), so repeated failures are visible
+  in the host's logs.
 - **Rotating `SECRET_KEY`** immediately invalidates the userscript; update `CONFIG.SECRET_KEY`
-  after rotating.
+  after rotating. It is separate from the dashboard login, which keeps working.
 - **No scraping.** The dependency tree contains no browser automation or HTML parsing
   library; the browser supplies all metadata.
 - Server-side error details are logged in structured JSON (Vercel captures them) and never
@@ -237,31 +350,45 @@ is met by the serverless function.
 
 ---
 
-## 9. Project layout
+## 10. Project layout
 
 ```
 src/
   app/
-    api/health/route.ts     liveness probe (no auth, no data)
-    api/links/route.ts      POST + GET + OPTIONS
+    (app)/                  authenticated pages: navbar layout + dashboard
+      layout.tsx            renders the navbar
+      page.tsx              dashboard (password protected, force-dynamic)
+    login/
+      page.tsx              login page: single password field, no username
+      login-form.tsx        client form (POST /api/auth/login)
+    api/
+      auth/login/route.ts   creates the session cookie
+      auth/logout/route.ts  clears the session cookie
+      health/route.ts       liveness probe (no auth, no data)
+      links/route.ts        POST + GET + OPTIONS
     globals.css             Tailwind entry
     layout.tsx              root layout
-    page.tsx                dashboard (password protected, force-dynamic)
   components/
     EmptyState.tsx          onboarding copy when there are no links
     LinkCard.tsx            thumbnail / title / host / open button
+    LogoutButton.tsx        navbar log out control
+    Navbar.tsx              top navigation
+    NavLinks.tsx            active-aware nav links
     SetupProblem.tsx        shown when the database is unreachable
   db/
     client.ts               lazy libSQL client + drizzle instance, cached per URL
     links.ts                upsertLink + listLinks (the only SQL in the app)
     schema.ts               links table
   lib/
-    auth.ts                 x-secret-key verification
-    basic-auth.ts           dashboard password gate decision
+    auth.ts                 x-secret-key verification (userscript API)
+    dashboard-auth.ts       dashboard password check + gate decision
     logger.ts               structured JSON events
+    nav.ts                  navbar items (add a module here)
+    redirect.ts             ?next= sanitising (open-redirect protection)
+    session.ts              signed session token: sign + verify
     time.ts                 relative time formatting
     validation.ts           payload + query validation
-  proxy.ts                  HTTP Basic Auth gate for the dashboard
+  proxy.ts                  session gate for the dashboard pages
   types/api.ts              wire format + error codes
 drizzle/                    generated SQL migrations (applied by tests too)
 tests/                      Vitest suites and helpers
