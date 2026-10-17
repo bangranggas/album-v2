@@ -173,6 +173,7 @@ turso db tokens create link-collector     # -> TURSO_AUTH_TOKEN
 | --- | --- |
 | `TURSO_DATABASE_URL is not set` | No `.env.local` (or the variable is blank). Copy `.env.example` and fill it in. |
 | `The link database is not reachable` on the dashboard | The URL/token pair is wrong, or the tables do not exist yet. Re-check both values, then run `npm run db:push`. |
+| Same panel, but the URL and token are definitely right | The connection works and the schema is simply older than the code — typically an earlier `db:push` was interrupted, so some objects are missing (the server log says `no such table: locked_domains`). Run `npm run db:push` again: it only adds what is missing and leaves existing rows alone. |
 | `authentication error` / `401` from libSQL | `TURSO_AUTH_TOKEN` is wrong, expired, or belongs to a different database. Create a fresh token. |
 | Works locally, `500` in production | The environment variables were not added in the host's dashboard. See §8. |
 
