@@ -38,7 +38,7 @@
 
   const CONFIG = {
     /** Base URL of the deployed app, without a trailing slash. */
-    API_BASE_URL: "http://localhost:3000",
+    API_BASE_URL: "http://localhost:4200",
 
     /** Must equal the server's SECRET_KEY. Fill this in locally. */
     SECRET_KEY: "",

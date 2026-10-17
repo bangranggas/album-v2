@@ -23,17 +23,17 @@ Planning and design documents live in [`docs/instant-link-collector/`](docs/inst
 > (`npm.ps1 cannot be loaded`), use `npm.cmd` instead of `npm` for every command in this
 > README.
 
-> **Windows port note:** Hyper-V reserves blocks of local ports, which can make
-> `npm run dev` fail with `EACCES`. Check with
-> `netsh interface ipv4 show excludedportrange protocol=tcp` and pick a port outside those
-> ranges, for example:
+> **Windows port note:** Hyper-V reserves blocks of local ports, which can make a default
+> port fail with `EACCES`. This project defaults to port **4200** (set in `package.json`),
+> which avoids those reserved ranges. If you need a different port, check
+> `netsh interface ipv4 show excludedportrange protocol=tcp` and override with:
 >
 > ```powershell
-> npm.cmd run dev -- -p 4200
+> npm.cmd run dev -- -p 4300
 > ```
 >
 > Then set `CONFIG.API_BASE_URL` in the userscript to the same origin
-> (`http://localhost:4200`).
+> (`http://localhost:4200` by default).
 
 ---
 
@@ -71,7 +71,7 @@ Start the app:
 npm.cmd run dev
 ```
 
-Open `http://localhost:3000` and log in with `DASHBOARD_PASSWORD`. The browser's native
+Open `http://localhost:4200` and log in with `DASHBOARD_PASSWORD`. The browser's native
 password prompt appears; the username is ignored.
 
 ### Environment variables
@@ -95,7 +95,7 @@ password prompt appears; the username is ignored.
 3. Edit the `CONFIG` block at the top of the file:
 
    ```js
-   API_BASE_URL: "http://localhost:3000",  // or your Vercel URL
+   API_BASE_URL: "http://localhost:4200",  // or your Vercel URL
    SECRET_KEY: "<the same value as the server's SECRET_KEY>",
    ```
 
@@ -131,7 +131,7 @@ covers its subdomains). Extend these lists as needed — no other code has to ch
 ### `POST /api/links`
 
 ```bash
-curl -X POST http://localhost:3000/api/links \
+curl -X POST http://localhost:4200/api/links \
   -H "content-type: application/json" \
   -H "x-secret-key: $SECRET_KEY" \
   -d '{"url":"https://example.com/a","title":"Example","thumbnail":null}'

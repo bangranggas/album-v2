@@ -4,9 +4,9 @@
   "private": true,
   "description": "Tampermonkey instant link collector + Next.js ingestion API and dashboard.",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 4200",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 4200",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
