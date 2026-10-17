@@ -1,4 +1,4 @@
-# Instant Link Collector
+# Instant Link Collector v1
 
 Save any web page to your own cloud database with a single click, from a Tampermonkey
 userscript. All metadata extraction (URL, title, `og:image`) happens in the browser, so the
