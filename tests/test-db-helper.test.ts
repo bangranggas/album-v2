@@ -18,6 +18,7 @@ describe("test database helper", () => {
     await db.insert(links).values({
       id: "link-1",
       url: "https://example.com/a",
+      domain: "example.com",
       title: "Example",
       thumbnail: null,
       createdAt: 1_700_000_000_000,
@@ -38,6 +39,7 @@ describe("test database helper", () => {
     const row = {
       id: "link-1",
       url: "https://example.com/duplicate",
+      domain: "example.com",
       title: "First",
       thumbnail: null,
       createdAt: 1,

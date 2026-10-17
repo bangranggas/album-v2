@@ -67,6 +67,19 @@ Create the database schema:
 npm.cmd run db:push
 ```
 
+`db:push` creates the current schema in one step, which is all a fresh database needs. If you
+already had a database from before the `domain` column was added, apply the migration instead,
+because only a migration can also backfill the domains of the links you already saved:
+
+```bash
+npm.cmd run db:migrate
+```
+
+A database created with `db:push` has no migration history, so `db:migrate` would try to
+recreate the tables it already has. For that case run the statements in
+`drizzle/0001_*.sql` against it directly — they add the column, index it, and backfill every
+existing row.
+
 Start the app:
 
 ```bash
@@ -250,6 +263,30 @@ redirected to `/login?next=<the page you asked for>`; `?next=` is sanitised, so 
 ever point at a path on this site (no open redirect). While `DASHBOARD_PASSWORD` is unset or
 too short, gated pages answer `503` instead of rendering.
 
+### Filtering and search
+
+The dashboard list can be narrowed by domain and by free text, and the filter state lives in
+the URL, so a filtered view can be reloaded, bookmarked, and shared.
+
+| Parameter | Meaning |
+| --- | --- |
+| `?domain=` | Exact domain match, e.g. `/?domain=www.indoav.com`. Lowercased before it is matched, so `?domain=Example.COM` works. |
+| `?q=` | Case-insensitive substring of the **title** or the **url** (which also covers the domain), e.g. `/?q=hotel`. `%` and `_` are matched literally, not as wildcards. |
+
+Both can be combined (`/?domain=example.com&q=hotel`) and both are optional; an empty or
+whitespace-only value means "no filter". Over-long values are truncated (200 characters for
+the search, 253 for the domain) rather than ignored.
+
+Filtering and the 100-row cap are one query, so the limit applies to the **filtered** result:
+narrowing the view never hides a match behind the cap. The dropdown is always built from the
+whole table, so an active filter cannot hide the domain you want to switch to, and each
+option carries its link count. The count line reads `4 links` unfiltered and `2 of 5 links`
+while filtering.
+
+Domains are not parsed out of the URL on every read: `links.domain` is a real column,
+derived once during validation and stored. A re-save rewrites it, so a link saved before the
+column existed repairs itself the next time it is saved.
+
 ### CORS
 
 The API answers the `OPTIONS` preflight and sends
@@ -274,7 +311,7 @@ applied, so no cloud credentials and no cleanup are required.
 
 | Test file | Covers |
 | --- | --- |
-| `tests/validation.test.ts` | Payload parsing, normalisation, length caps, limit parameter |
+| `tests/validation.test.ts` | Payload parsing, normalisation, length caps, limit parameter, derived domain |
 | `tests/login-input.test.ts` | Login payload validation (single password, no username) |
 | `tests/auth.test.ts` | Secret-key verification, constant-time comparison, fail-closed behaviour |
 | `tests/session.test.ts` | Session token signing/verification, expiry, tampering, fail-closed |
@@ -283,7 +320,8 @@ applied, so no cloud credentials and no cleanup are required.
 | `tests/proxy.test.ts` | Redirect vs. allow vs. `503`, `?next=` handling, matcher exclusions |
 | `tests/redirect.test.ts` | `?next=` sanitising (open-redirect protection) |
 | `tests/logger.test.ts` | Event shape, domain/IP extraction, serialization safety |
-| `tests/links-repository.test.ts` | Insert vs update, upsert idempotency, concurrent saves, ordering |
+| `tests/link-filters.test.ts` | `?q=` / `?domain=` normalisation and URL building |
+| `tests/links-repository.test.ts` | Insert vs update, upsert idempotency, concurrent saves, ordering, domain filter, search (incl. escaped `%`/`_`), domain list, counts |
 | `tests/api-links.test.ts` | Full `POST`/`GET`/`OPTIONS` behaviour, status codes, CORS, analytics events |
 | `tests/time.test.ts` | Relative-time formatting boundaries |
 | `tests/userscript.test.ts` | Blacklist rules and metadata extraction, run in a Node `vm` harness |
@@ -301,6 +339,7 @@ applied, so no cloud credentials and no cleanup are required.
 | `npm run test` | Vitest, single run |
 | `npm run test:watch` | Vitest in watch mode |
 | `npm run db:generate` | Generate a new SQL migration from `src/db/schema.ts` |
+| `npm run db:migrate` | Apply the migrations in `drizzle/` in order (data backfills included) |
 | `npm run db:push` | Apply the schema to the database in `.env.local` |
 | `npm run db:studio` | Drizzle Studio |
 
@@ -317,7 +356,8 @@ rest of the deployment.
    `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `SECRET_KEY`, and `DASHBOARD_PASSWORD`
    (16+ characters).
 4. Apply the schema to the hosted database once, from your machine:
-   `TURSO_DATABASE_URL=... TURSO_AUTH_TOKEN=... npm run db:push`
+   `TURSO_DATABASE_URL=... TURSO_AUTH_TOKEN=... npm run db:push` (or `db:migrate` if the
+   database already exists and you want the data backfills too).
 5. Deploy, open the deployment, and log in at `/login`.
 6. Point `CONFIG.API_BASE_URL` in your local userscript copy at the deployment URL.
 
@@ -370,18 +410,21 @@ src/
     layout.tsx              root layout
   components/
     EmptyState.tsx          onboarding copy when there are no links
-    LinkCard.tsx            thumbnail / title / host / open button
+    LinkCard.tsx            thumbnail / title / domain / open button
+    LinkFilters.tsx         domain dropdown + search box, drives the URL
     LogoutButton.tsx        navbar log out control
     Navbar.tsx              top navigation
     NavLinks.tsx            active-aware nav links
+    NoMatches.tsx           shown when links exist but none match the filters
     SetupProblem.tsx        shown when the database is unreachable
   db/
     client.ts               lazy libSQL client + drizzle instance, cached per URL
-    links.ts                upsertLink + listLinks (the only SQL in the app)
+    links.ts                upsertLink + listLinks/listDomains/countLinks (the only SQL)
     schema.ts               links table
   lib/
     auth.ts                 x-secret-key verification (userscript API)
     dashboard-auth.ts       dashboard password check + gate decision
+    link-filters.ts         ?q= / ?domain= normalisation + URL building
     logger.ts               structured JSON events
     nav.ts                  navbar items (add a module here)
     redirect.ts             ?next= sanitising (open-redirect protection)

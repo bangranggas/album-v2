@@ -13,19 +13,27 @@ export interface LinkInput {
   url: string;
   title: string;
   thumbnail: string | null;
+  /** Lowercased host of `url`, used to group and filter links on the dashboard. */
+  domain: string;
 }
 
 export interface LoginInput {
   password: string;
 }
 
-function isHttpUrl(value: string): boolean {
+function parseHttpUrl(value: string): URL | null {
   try {
     const parsed = new URL(value);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+      ? parsed
+      : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+export function isHttpUrl(value: string): boolean {
+  return parseHttpUrl(value) !== null;
 }
 
 /**
@@ -73,6 +81,9 @@ const linkInputSchema = z
       url: value.url,
       title: value.title,
       thumbnail: normalizeThumbnail(value.thumbnail),
+      // `url` was already refined to an absolute http(s) URL, so the parse cannot
+      // fail here; the fallback only keeps this total for the type checker.
+      domain: parseHttpUrl(value.url)?.host ?? "",
     }),
   );
 

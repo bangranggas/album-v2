@@ -44,7 +44,10 @@ describe("parseLinkInput", () => {
   it("accepts a complete payload", () => {
     const result = parseLinkInput(validPayload);
 
-    expect(result).toEqual({ ok: true, data: validPayload });
+    expect(result).toEqual({
+      ok: true,
+      data: { ...validPayload, domain: "example.com" },
+    });
   });
 
   it("normalizes an empty thumbnail to null", () => {
@@ -165,6 +168,32 @@ describe("parseLinkInput", () => {
     const result = parseLinkInput({ ...validPayload, injected: "value" });
 
     expect(result.ok).toBe(true);
+  });
+
+  describe("derived domain", () => {
+    function domainOf(url: string): string | undefined {
+      const result = parseLinkInput({ ...validPayload, url });
+
+      return result.ok ? result.data.domain : undefined;
+    }
+
+    it.each([
+      ["a plain host", "https://example.com/article", "example.com"],
+      ["an http url", "http://example.com/article", "example.com"],
+      ["a url with no path", "https://example.com", "example.com"],
+      ["a lowercase result", "https://WWW.Example.COM/Path", "www.example.com"],
+      ["a host with a port", "https://example.com:8443/x", "example.com:8443"],
+      ["dropped credentials", "https://user:pass@example.com/x", "example.com"],
+      ["an ip address", "http://127.0.0.1:4200/x", "127.0.0.1:4200"],
+      ["a punycode unicode host", "https://münchen.de/x", "xn--mnchen-3ya.de"],
+      ["a subdomain chain", "https://a.b.example.com/x", "a.b.example.com"],
+    ])("derives %s", (_label, url, expected) => {
+      expect(domainOf(url)).toBe(expected);
+    });
+
+    it("is never returned for a rejected url", () => {
+      expect(domainOf("not-a-url")).toBeUndefined();
+    });
   });
 });
 

@@ -1,6 +1,7 @@
 import type { Link } from "@/db/schema";
 import { formatRelativeTime } from "@/lib/time";
 
+/** Fallback for a legacy row whose domain could not be derived at write time. */
 function hostOf(url: string): string {
   try {
     return new URL(url).host;
@@ -10,7 +11,7 @@ function hostOf(url: string): string {
 }
 
 export function LinkCard({ link }: { link: Link }) {
-  const host = hostOf(link.url);
+  const host = link.domain === "" ? hostOf(link.url) : link.domain;
 
   return (
     <article className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md">
