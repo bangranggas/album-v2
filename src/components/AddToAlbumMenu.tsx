@@ -1,11 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
+import { AlbumPickerPanel } from "@/components/AlbumPickerPanel";
 import type { AlbumOption } from "@/db/albums";
-import { callApi } from "@/lib/dashboard-api";
-import { MAX_ALBUM_NAME_LENGTH } from "@/lib/validation";
+import { callApi, readCreatedAlbumId } from "@/lib/dashboard-api";
 
 function FolderPlusIcon() {
   return (
@@ -28,24 +28,6 @@ function FolderPlusIcon() {
 const ICON_BUTTON =
   "inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 dark:focus-visible:outline-slate-100";
 
-const FIELD =
-  "w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-100 dark:focus:ring-slate-100";
-
-/**
- * The new album's id, read defensively out of the create response: the panel is a
- * client component, so the payload is `unknown` until it has been checked.
- */
-function readAlbumId(data: unknown): string | null {
-  if (typeof data !== "object" || data === null) return null;
-
-  const album = (data as { album?: unknown }).album;
-  if (typeof album !== "object" || album === null) return null;
-
-  const id = (album as { id?: unknown }).id;
-
-  return typeof id === "string" && id !== "" ? id : null;
-}
-
 export interface AddToAlbumMenuProps {
   linkId: string;
   /** Every album, in the Albums tab's order. */
@@ -57,12 +39,7 @@ export interface AddToAlbumMenuProps {
 }
 
 /**
- * The per-card "add to album" popup: a checkbox per album, plus "create an album
- * and put this link in it".
- *
- * It is a panel inside the card, not a dialog or a `window.prompt` — the project
- * keeps every interaction on the page. It closes on the `Done` button, on `Escape`,
- * and on a click outside.
+ * The per-card "add to album" popup: the shared album panel in its one-link mode.
  *
  * Checking is optimistic (the box flips at once) and the server is the final word:
  * every change ends in `router.refresh()`, so the props coming back replace the
@@ -78,8 +55,6 @@ export function AddToAlbumMenu({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [newName, setNewName] = useState("");
-  const [creating, setCreating] = useState(false);
   const container = useRef<HTMLDivElement>(null);
 
   const [memberIds, setMemberIds] = useState<readonly string[]>(memberAlbumIds);
@@ -107,29 +82,7 @@ export function AddToAlbumMenu({
   const close = useCallback(() => {
     setOpen(false);
     setError(null);
-    setNewName("");
   }, []);
-
-  useEffect(() => {
-    if (!open) return undefined;
-
-    function onKeyDown(event: KeyboardEvent): void {
-      if (event.key === "Escape") close();
-    }
-
-    function onPointerDown(event: MouseEvent): void {
-      if (container.current?.contains(event.target as Node) === true) return;
-      close();
-    }
-
-    document.addEventListener("keydown", onKeyDown);
-    document.addEventListener("mousedown", onPointerDown);
-
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.removeEventListener("mousedown", onPointerDown);
-    };
-  }, [close, open]);
 
   async function toggle(albumId: string, checked: boolean): Promise<void> {
     if (busy) return;
@@ -161,8 +114,8 @@ export function AddToAlbumMenu({
     router.refresh();
   }
 
-  async function createAndAdd(): Promise<void> {
-    if (busy) return;
+  async function createAndAdd(name: string): Promise<string | null> {
+    if (busy) return null;
 
     setBusy(true);
     setError(null);
@@ -170,21 +123,24 @@ export function AddToAlbumMenu({
     // Two calls, in order: the album has to exist before the link can join it. The
     // create endpoint is the same tested one the Albums tab uses, and it answers
     // with the new album, so the id never has to be guessed from the name.
-    const created = await callApi("/api/dashboard/albums", "POST", { name: newName });
-    const albumId = created.ok ? readAlbumId(created.data) : null;
+    const created = await callApi("/api/dashboard/albums", "POST", { name });
+    const albumId = created.ok ? readCreatedAlbumId(created.data) : null;
 
     if (albumId === null) {
       setBusy(false);
+
       if (created.ok) {
-        setError(
-          "The album was created, but the link could not be added. Add it from the album's page.",
-        );
+        const message =
+          "The album was created, but the link could not be added. Add it from the album's page.";
+        setError(message);
         router.refresh();
-        return;
+
+        return message;
       }
 
       handleFailure(created.status, created.message);
-      return;
+
+      return created.message;
     }
 
     const added = await callApi(`/api/dashboard/links/${linkId}/albums`, "POST", {
@@ -198,13 +154,14 @@ export function AddToAlbumMenu({
       // The album exists now, so the refreshed page shows it; only the membership
       // has to be retried.
       router.refresh();
-      return;
+
+      return added.message;
     }
 
     setMemberIds((ids) => (ids.includes(albumId) ? ids : [...ids, albumId]));
-    setNewName("");
-    setCreating(false);
     router.refresh();
+
+    return null;
   }
 
   return (
@@ -225,101 +182,20 @@ export function AddToAlbumMenu({
 
       {!open ? null : (
         <div className="absolute right-0 z-20 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-3 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-          <p className="mb-2 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-            Albums for this link
-          </p>
-
-          {albums.length === 0 ? (
-            <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
-              No albums yet. Create the first one below.
-            </p>
-          ) : (
-            <ul className="mb-2 flex max-h-56 flex-col gap-1 overflow-y-auto">
-              {albums.map((album) => (
-                <li key={album.id}>
-                  <label className="flex cursor-pointer items-center gap-2 rounded-lg px-1.5 py-1 text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800">
-                    <input
-                      type="checkbox"
-                      checked={memberIds.includes(album.id)}
-                      disabled={busy}
-                      onChange={(event) => toggle(album.id, event.target.checked)}
-                      className="h-3.5 w-3.5 accent-slate-900 dark:accent-slate-100"
-                    />
-                    <span className="truncate" title={album.name}>
-                      {album.name}
-                    </span>
-                  </label>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {creating ? (
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                void createAndAdd();
-              }}
-              className="mb-2 flex flex-col gap-1.5"
-            >
-              <label className="flex flex-col gap-1 text-[11px] font-medium text-slate-600 dark:text-slate-400">
-                New album name
-                <input
-                  value={newName}
-                  onChange={(event) => setNewName(event.target.value)}
-                  required
-                  maxLength={MAX_ALBUM_NAME_LENGTH}
-                  className={FIELD}
-                />
-              </label>
-              <div className="flex items-center gap-2">
-                <button
-                  type="submit"
-                  disabled={busy}
-                  className="rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-700 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300"
-                >
-                  {busy ? "Creating…" : "Create and add"}
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => {
-                    setCreating(false);
-                    setNewName("");
-                    setError(null);
-                  }}
-                  className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 disabled:opacity-60 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setError(null);
-                setCreating(true);
-              }}
-              className="mb-2 w-full rounded-lg border border-dashed border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-            >
-              + New album…
-            </button>
-          )}
-
-          {error === null ? null : (
-            <p role="alert" className="mb-2 text-xs text-red-600 dark:text-red-400">
-              {error}
-            </p>
-          )}
-
-          <button
-            type="button"
-            onClick={close}
-            className="w-full rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-          >
-            Done
-          </button>
+          <AlbumPickerPanel
+            mode="toggle"
+            albums={albums}
+            memberAlbumIds={memberIds}
+            onToggle={(albumId, checked) => {
+              void toggle(albumId, checked);
+            }}
+            onCreate={createAndAdd}
+            onDone={close}
+            onClearError={() => setError(null)}
+            busy={busy}
+            error={error}
+            containerRef={container}
+          />
         </div>
       )}
     </div>

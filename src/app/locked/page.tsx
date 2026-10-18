@@ -250,6 +250,7 @@ export default async function LockedPage({
                 locked
                 albums={result.data.albums}
                 memberships={result.data.memberships}
+                selectable
               />
             </>
           )}

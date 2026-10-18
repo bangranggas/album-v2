@@ -11,6 +11,8 @@ server never scrapes anything and can run entirely on free tiers.
   add one by hand — from the dashboard.
 - **Albums:** a second tab on both dashboards (`?tab=albums`) where links can be grouped into
   named collections. A link can sit in several albums, and the link itself never moves.
+- **Bulk filing:** tick several cards at once and file them all into one album in a single
+  action — including into an album created on the spot.
 - **Locked area:** `/locked` — a dark, passcode-protected page where domains can be marked as
   hidden. Their links disappear from `/` entirely and live only there.
 - **Read API:** `GET /api/links` — secret-key protected JSON.
@@ -20,7 +22,8 @@ Planning and design documents live in [`docs/instant-link-collector/`](docs/inst
 the login page / navbar work in [`docs/dashboard-login-navbar/`](docs/dashboard-login-navbar),
 the filter work in [`docs/dashboard-filters/`](docs/dashboard-filters), the locked area /
 link management in [`docs/locked-domains-and-link-management/`](docs/locked-domains-and-link-management),
-and albums in [`docs/albums/`](docs/albums).
+albums in [`docs/albums/`](docs/albums), and bulk album filing in
+[`docs/bulk-album-assign/`](docs/bulk-album-assign).
 
 ---
 
@@ -346,6 +349,19 @@ the original link, and the same link can sit in several albums.
   inside the card, and both are permanent in the same way link deletes are. Deleting an album
   deletes only the album — its links stay on the main list. On an album page, each card also
   offers `Remove from this album`, which never deletes the link itself.
+- **Filing many links at once** happens on the **Links** tab. Every card has a checkbox, and as
+  soon as one is ticked an action bar appears at the bottom of the screen with the selection
+  count, `Add to album`, and `Clear`. `Select all on this page` ticks every card the page is
+  rendering (filters and the 100-row cap included), and when a filter hides part of the
+  selection the bar says how many links are *out of view* — they are still filed. The panel that
+  opens is the card popup's, in an add-only mode: clicking an album files the whole selection
+  into it, links that were already there are reported as `already there`, and the selection
+  stays selected afterwards, so the same set can go into a second album without re-ticking
+  anything. No albums yet? `+ New album…` creates one and files the selection into it in the
+  same flow. Adding is the *only* bulk action: there is no bulk delete, no bulk favorite, and
+  the album pages keep their per-card `Remove from this album`. The selection itself is page
+  state rather than a URL parameter — it is a transient action, and a page full of UUIDs would
+  make a shared link unreadable — so a reload starts from nothing.
 - **Albums obey the hidden/visible rule.** Counts and covers are computed with the same
   `locked_domains` condition the link queries use, so a hidden link cannot reach `/` through an
   album's count, cover, or placeholder domain. Album *names* are labels, not link data, so the
@@ -385,6 +401,7 @@ These are called by the dashboard itself and are authenticated by the `lc_sessio
 | `DELETE /api/dashboard/links/:id` | — | Permanent, and also removes the link from every album. `404` when there was nothing to delete. |
 | `POST /api/dashboard/links/:id/albums` | `{ albumId }` | Puts the link in an album. Idempotent: `{ added: false }` when it was already there, `404` when the album or link is gone. |
 | `DELETE /api/dashboard/links/:id/albums/:albumId` | — | Takes the link out of one album, leaving the link and its other albums alone. |
+| `POST /api/dashboard/albums/:id/links` | `{ linkIds: [...] }` | Files a whole selection into one album, in one transaction. Answers `{ added, alreadyIn, skipped }`; ids that no longer exist are skipped instead of being written. `400` for a missing/empty/over-long list (200 ids max), `404` when the album is gone. |
 | `POST /api/dashboard/albums` | `{ name }` | Creates an album. `201` with the album, `400` for a blank/over-long name, `409` for a name another album has. |
 | `PATCH /api/dashboard/albums/:id` | `{ name }` | Renames. `404` when gone, `409` on a name clash; renaming to its own name (in any case) succeeds. |
 | `DELETE /api/dashboard/albums/:id` | — | Deletes the album and its memberships. The links stay. |
@@ -441,11 +458,12 @@ applied, so no cloud credentials and no cleanup are required.
 | `tests/logger.test.ts` | Event shape, domain/IP extraction, serialization safety |
 | `tests/link-filters.test.ts` | `?q=` / `?domain=` / `?favorite=` normalisation, tab (`?tab=`) and album-search (`?aq=`) resolution, URL building, count formatting |
 | `tests/links-repository.test.ts` | Insert vs update, upsert idempotency, concurrent saves, ordering, scope (visible vs. locked), domain filter, favorite filter, album filter, search (incl. escaped `%`/`_`), domain list, counts |
-| `tests/album-validation.test.ts` | Album name/membership payloads: trimming, blank rejection, the 100-character cap, and the derived `nameKey` |
-| `tests/albums-repository.test.ts` | Album create/rename/delete, scoped counts + covers + placeholder domain, membership add/remove idempotency, and that deleting a link clears its memberships |
+| `tests/album-validation.test.ts` | Album name/membership payloads: trimming, blank rejection, the 100-character cap, the derived `nameKey`, and bulk `linkIds` lists (trimming, dedupe, the 200-id cap) |
+| `tests/albums-repository.test.ts` | Album create/rename/delete, scoped counts + covers + placeholder domain, membership add/remove idempotency, bulk add counts (new / already-in / unknown) with no orphan rows, and that deleting a link clears its memberships |
 | `tests/albums-lib.test.ts` | Cover-collage slots (`COLLAGE_SLOTS`), album count formatting, detail-page hrefs for both themes |
-| `tests/album-routes.test.ts` | The four album + membership handlers: session gating, `400`/`404`/`409`, idempotent membership, and that `nameKey` never leaves the server |
-| `tests/dashboard-api.test.ts` | The client fetch helper: payload on success, error message/status on failure, and a request that never left the browser |
+| `tests/link-selection.test.ts` | The bulk selection rules: toggle, union/dedupe, remove, visible-vs-out-of-view partition, the bar's label, and the post-add report |
+| `tests/album-routes.test.ts` | The six album + membership handlers: session gating, `400`/`404`/`409`, idempotent membership, bulk add counts, and that `nameKey` never leaves the server |
+| `tests/dashboard-api.test.ts` | The client fetch helper (payload on success, message/status on failure, a request that never left the browser) and the two defensive payload readers |
 | `tests/sql-support.test.ts` | Shared SQL helpers: LIKE-pattern escaping and unique-violation detection through drizzle's error wrapper |
 | `tests/locked-domains-repository.test.ts` | Locking, unlocking, idempotency, and that a locked domain hides its links |
 | `tests/api-links.test.ts` | Full `POST`/`GET`/`OPTIONS` behaviour, status codes, CORS, analytics events |
@@ -517,9 +535,11 @@ is met by the serverless function.
   dropdown, the count, or — since albums — an album's count, cover collage, or placeholder
   domain; there is no code path that forgets to filter.
 - **Link and album mutations need the dashboard session.** Editing, deleting, and adding links,
-  filing a link into an album, and creating/renaming/deleting an album all go through
-  session-gated endpoints; changing what is hidden needs the session *and* the passcode. Ids are
-  UUIDs, so they cannot be guessed from outside.
+  filing a link (or a whole selection) into an album, and creating/renaming/deleting an album all
+  go through session-gated endpoints; changing what is hidden needs the session *and* the
+  passcode. Ids are UUIDs, so they cannot be guessed from outside. The bulk endpoint only ever
+  *writes* memberships, and any id it does not find in `links` is skipped instead of stored, so
+  even a hand-made request cannot leave a row behind that no page could ever show.
 - **Rotating `SECRET_KEY`** immediately invalidates the userscript; update `CONFIG.SECRET_KEY`
   after rotating. It is separate from the dashboard login, which keeps working.
 - **No scraping.** The dependency tree contains no browser automation or HTML parsing
@@ -557,6 +577,7 @@ src/
       dashboard/links/[id]/albums/[albumId]/route.ts    DELETE: take it out again
       dashboard/albums/route.ts       POST: create an album
       dashboard/albums/[id]/route.ts  PATCH / DELETE: rename, delete
+      dashboard/albums/[id]/links/route.ts              POST: file a selection into an album
       health/route.ts                 liveness probe (no auth, no data)
       links/route.ts                  POST + GET + OPTIONS (userscript, secret key)
       locked/unlock/route.ts          POST: exchange the passcode for a 1-hour cookie
@@ -567,19 +588,20 @@ src/
     layout.tsx              root layout
   components/
     AddLinkForm.tsx         manual "add link" form
-    AddToAlbumMenu.tsx      per-card album checkbox panel (create + file in one flow)
+    AddToAlbumMenu.tsx      per-card album popup (one link, create + file in one flow)
     AlbumActions.tsx        inline rename / two-step delete for an album
     AlbumCard.tsx           cover collage / name / scoped link count
     AlbumCover.tsx          the 2×2 collage, grey placeholder, folder glyph
     AlbumCreateForm.tsx     "New album" form on the Albums tab
     AlbumGrid.tsx           the album grid and its two empty states
+    AlbumPickerPanel.tsx    the shared album panel (toggle one link / file a selection)
     AlbumSearch.tsx         album-name search, drives `?aq=`
     DashboardTabs.tsx       the Links / Albums tab strip (`?tab=`)
     EmptyState.tsx          onboarding copy when there are no links
     LinkActions.tsx         star / add to album / inline edit / two-step delete
-    LinkCard.tsx            thumbnail / title / domain / open button
+    LinkCard.tsx            thumbnail / title / domain / open button / selection checkbox
     LinkFilters.tsx         search + domain + favorites, drives the URL
-    LinkGrid.tsx            the card grid and its "no matches" state
+    LinkGrid.tsx            the card grid, its "no matches" state, and multi-select wiring
     LockedDomainsPanel.tsx  list, add, and unlock hidden domains
     LockedHeader.tsx        locked page heading + "Lock now"
     LogoutButton.tsx        navbar log out control
@@ -587,6 +609,10 @@ src/
     NavLinks.tsx            active-aware nav links
     NoMatches.tsx           shown when links exist but none match the filters
     PasscodeNotConfigured.tsx  shown when LOCKED_PASSCODE is unset or blank
+    SelectAllToggle.tsx     "select all on this page" above the grid
+    SelectCheckbox.tsx      one card's selection checkbox (nothing without a provider)
+    SelectionBar.tsx        the floating bar: count, out of view, add to album, clear
+    SelectionProvider.tsx   the bulk selection state shared by the grid
     SetupProblem.tsx        shown when the database is unreachable
   db/
     client.ts               lazy libSQL client + drizzle instance, cached per URL
@@ -603,6 +629,7 @@ src/
     dashboard-api.ts        client-side fetch helper for the dashboard endpoints
     dashboard-auth.ts       dashboard password check + gate decision
     link-filters.ts         ?q= / ?domain= / ?favorite= / ?tab= / ?aq= normalisation + URL building
+    link-selection.ts       bulk selection rules: toggle, union, partition, labels, report
     locked-auth.ts          passcode check + locked gate decision
     locked-session.ts       the `lc_locked` token (1 hour)
     logger.ts               structured JSON events

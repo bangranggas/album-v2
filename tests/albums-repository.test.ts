@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   addLinkToAlbum,
+  addLinksToAlbum,
   countAlbums,
   createAlbum,
   deleteAlbum,
@@ -14,7 +15,7 @@ import {
 } from "@/db/albums";
 import { deleteLink, listLinks } from "@/db/links";
 import { lockDomain } from "@/db/locked-domains";
-import { links } from "@/db/schema";
+import { albumLinks, links } from "@/db/schema";
 import { createTestDatabase, type TestDatabase } from "./helpers/test-db";
 
 const ANIME = { name: "Anime", nameKey: "anime" };
@@ -247,6 +248,151 @@ describe("addLinkToAlbum", () => {
 
     const memberships = await listAlbumIdsByLink(db, ["link-1"]);
     expect(memberships.get("link-1")?.sort()).toEqual(
+      [first.album.id, second.album.id].sort(),
+    );
+  });
+});
+
+describe("addLinksToAlbum", () => {
+  it("adds several links in one call", async () => {
+    const { db } = await freshDatabase();
+    const created = await createAlbum(db, ANIME);
+    if (!created.ok) throw new Error("setup failed");
+    await insertLink(db, { id: "link-1" });
+    await insertLink(db, { id: "link-2" });
+    await insertLink(db, { id: "link-3" });
+
+    await expect(
+      addLinksToAlbum(db, created.album.id, ["link-1", "link-2", "link-3"]),
+    ).resolves.toEqual({ added: 3, alreadyIn: 0, skipped: 0 });
+
+    const albums = await listAlbums(db);
+    expect(albums[0]?.linkCount).toBe(3);
+  });
+
+  it("separates new links, links already in the album, and unknown ids", async () => {
+    const { db } = await freshDatabase();
+    const created = await createAlbum(db, ANIME);
+    if (!created.ok) throw new Error("setup failed");
+    await insertLink(db, { id: "link-1" });
+    await insertLink(db, { id: "link-2" });
+    await insertLink(db, { id: "link-3" });
+    await addLinkToAlbum(db, created.album.id, "link-1");
+
+    const result = await addLinksToAlbum(db, created.album.id, [
+      "link-1",
+      "link-2",
+      "link-3",
+      "ghost",
+    ]);
+
+    expect(result).toEqual({ added: 2, alreadyIn: 1, skipped: 1 });
+    const albums = await listAlbums(db);
+    expect(albums[0]?.linkCount).toBe(3);
+  });
+
+  it("never writes a row for an unknown link id", async () => {
+    const { db } = await freshDatabase();
+    const created = await createAlbum(db, ANIME);
+    if (!created.ok) throw new Error("setup failed");
+    await insertLink(db, { id: "link-1" });
+
+    const result = await addLinksToAlbum(db, created.album.id, [
+      "link-1",
+      "ghost",
+      "phantom",
+    ]);
+
+    expect(result).toEqual({ added: 1, alreadyIn: 0, skipped: 2 });
+    // `album_links` has no foreign key, so an unguarded insert would leave rows
+    // behind that no page could ever show or delete.
+    const rows = await db.select().from(albumLinks);
+    expect(rows.map((row) => row.linkId)).toEqual(["link-1"]);
+  });
+
+  it("reports an unknown album and writes nothing", async () => {
+    const { db } = await freshDatabase();
+    await insertLink(db, { id: "link-1" });
+
+    await expect(addLinksToAlbum(db, "nope", ["link-1"])).resolves.toBe(
+      "album-not-found",
+    );
+    await expect(db.select().from(albumLinks)).resolves.toHaveLength(0);
+  });
+
+  it("treats an empty list as a no-op", async () => {
+    const { db } = await freshDatabase();
+    const created = await createAlbum(db, ANIME);
+    if (!created.ok) throw new Error("setup failed");
+
+    await expect(addLinksToAlbum(db, created.album.id, [])).resolves.toEqual({
+      added: 0,
+      alreadyIn: 0,
+      skipped: 0,
+    });
+  });
+
+  it("still reports an unknown album for an empty list", async () => {
+    const { db } = await freshDatabase();
+
+    await expect(addLinksToAlbum(db, "nope", [])).resolves.toBe(
+      "album-not-found",
+    );
+  });
+
+  it("is idempotent: the same list twice adds nothing the second time", async () => {
+    const { db } = await freshDatabase();
+    const created = await createAlbum(db, ANIME);
+    if (!created.ok) throw new Error("setup failed");
+    await insertLink(db, { id: "link-1" });
+    await insertLink(db, { id: "link-2" });
+    await addLinksToAlbum(db, created.album.id, ["link-1", "link-2"]);
+
+    await expect(
+      addLinksToAlbum(db, created.album.id, ["link-1", "link-2"]),
+    ).resolves.toEqual({ added: 0, alreadyIn: 2, skipped: 0 });
+    await expect(db.select().from(albumLinks)).resolves.toHaveLength(2);
+  });
+
+  it("counts a duplicated id once", async () => {
+    const { db } = await freshDatabase();
+    const created = await createAlbum(db, ANIME);
+    if (!created.ok) throw new Error("setup failed");
+    await insertLink(db, { id: "link-1" });
+
+    await expect(
+      addLinksToAlbum(db, created.album.id, ["link-1", "link-1"]),
+    ).resolves.toEqual({ added: 1, alreadyIn: 0, skipped: 0 });
+  });
+
+  it("accounts for every distinct id it was given", async () => {
+    const { db } = await freshDatabase();
+    const created = await createAlbum(db, ANIME);
+    if (!created.ok) throw new Error("setup failed");
+    await insertLink(db, { id: "link-1" });
+    await addLinkToAlbum(db, created.album.id, "link-1");
+
+    const ids = ["link-1", "ghost", "phantom", "link-1"];
+    const result = await addLinksToAlbum(db, created.album.id, ids);
+    if (result === "album-not-found") throw new Error("setup failed");
+
+    expect(result.added + result.alreadyIn + result.skipped).toBe(3);
+  });
+
+  it("leaves other albums and unselected links alone", async () => {
+    const { db } = await freshDatabase();
+    const first = await createAlbum(db, ANIME);
+    const second = await createAlbum(db, { name: "Movies", nameKey: "movies" });
+    if (!first.ok || !second.ok) throw new Error("setup failed");
+    await insertLink(db, { id: "link-1" });
+    await insertLink(db, { id: "link-2" });
+    await addLinkToAlbum(db, second.album.id, "link-2");
+
+    await addLinksToAlbum(db, first.album.id, ["link-1", "link-2"]);
+
+    const memberships = await listAlbumIdsByLink(db, ["link-1", "link-2"]);
+    expect(memberships.get("link-1")).toEqual([first.album.id]);
+    expect(memberships.get("link-2")?.sort()).toEqual(
       [first.album.id, second.album.id].sort(),
     );
   });

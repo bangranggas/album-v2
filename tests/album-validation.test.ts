@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_ALBUM_NAME_LENGTH,
+  MAX_BULK_LINK_IDS,
   parseAlbumLinkInput,
   parseAlbumName,
+  parseBulkAlbumLinkInput,
 } from "@/lib/validation";
 
 describe("parseAlbumName", () => {
@@ -107,5 +109,70 @@ describe("parseAlbumLinkInput", () => {
   it("rejects a payload that is not an object", () => {
     expect(parseAlbumLinkInput(null).ok).toBe(false);
     expect(parseAlbumLinkInput([]).ok).toBe(false);
+  });
+});
+
+describe("parseBulkAlbumLinkInput", () => {
+  it("accepts a list of link ids", () => {
+    expect(parseBulkAlbumLinkInput({ linkIds: ["a", "b"] })).toEqual({
+      ok: true,
+      data: { linkIds: ["a", "b"] },
+    });
+  });
+
+  it("trims every id", () => {
+    const result = parseBulkAlbumLinkInput({ linkIds: ["  a  ", " b"] });
+
+    expect(result.ok && result.data.linkIds).toEqual(["a", "b"]);
+  });
+
+  it("deduplicates the ids, keeping first-seen order", () => {
+    const result = parseBulkAlbumLinkInput({ linkIds: ["b", "a", "b", " b "] });
+
+    expect(result.ok && result.data.linkIds).toEqual(["b", "a"]);
+  });
+
+  it("accepts a list of exactly the maximum length", () => {
+    const ids = Array.from({ length: MAX_BULK_LINK_IDS }, (_, index) =>
+      `id-${index}`,
+    );
+
+    expect(parseBulkAlbumLinkInput({ linkIds: ids }).ok).toBe(true);
+  });
+
+  it("rejects a list longer than the maximum, measured after deduplication", () => {
+    const ids = Array.from({ length: MAX_BULK_LINK_IDS + 1 }, (_, index) =>
+      `id-${index}`,
+    );
+
+    expect(parseBulkAlbumLinkInput({ linkIds: ids }).ok).toBe(false);
+  });
+
+  it("accepts a long list once its duplicates are removed", () => {
+    const ids = ["a", "b", ...Array.from({ length: MAX_BULK_LINK_IDS + 5 }, () => "a")];
+
+    const result = parseBulkAlbumLinkInput({ linkIds: ids });
+
+    expect(result.ok && result.data.linkIds).toEqual(["a", "b"]);
+  });
+
+  it.each([
+    ["a missing field", {}],
+    ["a null field", { linkIds: null }],
+    ["a string instead of an array", { linkIds: "abc" }],
+    ["an empty array", { linkIds: [] }],
+    ["an empty string entry", { linkIds: [""] }],
+    ["a whitespace-only entry", { linkIds: ["a", "   "] }],
+    ["a non-string entry", { linkIds: ["a", 7] }],
+    ["a nested array entry", { linkIds: [["a"]] }],
+    ["the wrong field name", { ids: ["a"] }],
+  ])("rejects %s", (_label, payload) => {
+    expect(parseBulkAlbumLinkInput(payload).ok).toBe(false);
+  });
+
+  it("rejects a payload that is not an object", () => {
+    expect(parseBulkAlbumLinkInput(null).ok).toBe(false);
+    expect(parseBulkAlbumLinkInput("a").ok).toBe(false);
+    expect(parseBulkAlbumLinkInput([]).ok).toBe(false);
   });
 });

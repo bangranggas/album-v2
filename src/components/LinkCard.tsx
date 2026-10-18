@@ -1,4 +1,5 @@
 import { LinkActions } from "@/components/LinkActions";
+import { SelectCheckbox } from "@/components/SelectCheckbox";
 import type { AlbumOption } from "@/db/albums";
 import type { Link } from "@/db/schema";
 import { formatRelativeTime } from "@/lib/time";
@@ -40,6 +41,8 @@ export function LinkCard({
         "add to album" popup can overflow the card instead of being cut off.
       */}
       <div className="relative flex aspect-video items-center justify-center overflow-hidden rounded-t-xl bg-slate-100 dark:bg-slate-800">
+        <SelectCheckbox linkId={link.id} label={link.title} />
+
         {link.thumbnail ? (
           // Plain <img> on purpose: thumbnails come from arbitrary third-party
           // hosts, and next/image would add remote-pattern config plus Vercel

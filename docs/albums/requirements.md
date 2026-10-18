@@ -32,7 +32,8 @@ link still lives in `links`, and an album is a named collection of links.
 ## 3. Out of scope
 
 - **Manual album ordering** — dropped by the owner; albums are ordered automatically (D8).
-- Bulk "put these N links into an album", selecting many links at once.
+- Bulk "put these N links into an album", selecting many links at once — **delivered separately**,
+  after this feature shipped (`docs/bulk-album-assign/`).
 - A navbar entry for albums; album descriptions; nested albums; album sharing or permissions.
 - Drag & drop anywhere.
 - The userscript API (`POST` / `GET /api/links` with `x-secret-key`) neither reads nor writes

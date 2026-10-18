@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import { and, asc, count, eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, eq, inArray, sql, type SQL } from "drizzle-orm";
 
 import type { AlbumNameInput } from "@/lib/validation";
 import { COLLAGE_SLOTS } from "@/lib/albums";
+import type { BulkAddCounts } from "@/lib/link-selection";
 import type { Database } from "./client";
 import { scopeCondition, type LinkScope } from "./links";
 import { albumLinks, albums, links, type Album } from "./schema";
@@ -52,6 +53,9 @@ export type MembershipResult =
   | "already"
   | "album-not-found"
   | "link-not-found";
+
+/** The outcome of a bulk add: what was new, what was there, what was unknown. */
+export type BulkAddResult = BulkAddCounts | "album-not-found";
 
 /**
  * Creates an album. `nameKey` is what actually has to be unique, so the unique
@@ -382,6 +386,79 @@ export async function addLinkToAlbum(
     .returning();
 
   return inserted.length > 0 ? "added" : "already";
+}
+
+/**
+ * Adds many links to one album in a single request.
+ *
+ * Idempotent, like `addLinkToAlbum`, and honest about the three outcomes: ids
+ * that were new (`added`), ids that were already in the album (`alreadyIn`), and
+ * ids that no longer exist (`skipped`).
+ *
+ * Unknown ids are filtered out *before* the insert because `album_links` has no
+ * foreign key: an unguarded insert would leave a row that no page could ever show
+ * or clean up. The checks and the insert share one transaction, so the reported
+ * counts describe the same instant the write saw.
+ */
+export async function addLinksToAlbum(
+  db: Database,
+  albumId: string,
+  linkIds: readonly string[],
+): Promise<BulkAddResult> {
+  const ids = [...new Set(linkIds)];
+
+  return db.transaction(async (tx) => {
+    const album = await tx
+      .select({ id: albums.id })
+      .from(albums)
+      .where(eq(albums.id, albumId))
+      .limit(1);
+    if (album[0] === undefined) return "album-not-found";
+    if (ids.length === 0) return { added: 0, alreadyIn: 0, skipped: 0 };
+
+    const existing = await tx
+      .select({ id: links.id })
+      .from(links)
+      .where(inArray(links.id, ids));
+    const insertable = ids.filter((id) =>
+      existing.some((row) => row.id === id),
+    );
+
+    // One lookup for the whole selection: asking per link would be an N+1.
+    const members =
+      insertable.length === 0
+        ? []
+        : await tx
+            .select({ linkId: albumLinks.linkId })
+            .from(albumLinks)
+            .where(
+              and(
+                eq(albumLinks.albumId, albumId),
+                inArray(albumLinks.linkId, insertable),
+              ),
+            );
+    const fresh = insertable.filter(
+      (id) => !members.some((row) => row.linkId === id),
+    );
+
+    const createdAt = Date.now();
+    const inserted =
+      fresh.length === 0
+        ? []
+        : await tx
+            .insert(albumLinks)
+            .values(fresh.map((linkId) => ({ albumId, linkId, createdAt })))
+            .onConflictDoNothing({
+              target: [albumLinks.albumId, albumLinks.linkId],
+            })
+            .returning({ linkId: albumLinks.linkId });
+
+    return {
+      added: inserted.length,
+      alreadyIn: insertable.length - inserted.length,
+      skipped: ids.length - insertable.length,
+    };
+  });
 }
 
 /**

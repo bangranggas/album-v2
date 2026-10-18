@@ -414,6 +414,55 @@ export function parseAlbumLinkInput(raw: unknown): ParseResult<AlbumLinkInput> {
 }
 
 /**
+ * Most link ids one bulk request may carry.
+ *
+ * The rendered list is capped at 100 links, so this only bounds a hand-made
+ * request; it is measured after deduplication, because a repeated id is one link.
+ */
+export const MAX_BULK_LINK_IDS = 200;
+
+export interface BulkAlbumLinkInput {
+  /** Trimmed, deduplicated, first-seen order preserved. Never empty. */
+  linkIds: string[];
+}
+
+const bulkAlbumLinkSchema = z.object({
+  linkIds: z
+    .array(
+      z.string().trim().min(1, "every entry must be a non-empty link id"),
+      "must be an array of link ids",
+    )
+    .min(1, "must contain at least one link id"),
+});
+
+/**
+ * The ids a bulk "add to album" applies to. Bad ids are a `400` rather than a
+ * silent skip: the client only ever sends ids it just rendered.
+ */
+export function parseBulkAlbumLinkInput(
+  raw: unknown,
+): ParseResult<BulkAlbumLinkInput> {
+  if (!isPlainObject(raw)) {
+    return { ok: false, message: "payload: must be a JSON object" };
+  }
+
+  const result = bulkAlbumLinkSchema.safeParse(raw);
+  if (!result.success) {
+    return { ok: false, message: describeIssue(result.error) };
+  }
+
+  const linkIds = [...new Set(result.data.linkIds)];
+  if (linkIds.length > MAX_BULK_LINK_IDS) {
+    return {
+      ok: false,
+      message: `linkIds: must contain at most ${MAX_BULK_LINK_IDS} link ids`,
+    };
+  }
+
+  return { ok: true, data: { linkIds } };
+}
+
+/**
  * The dashboard has no usernames: a single password is the entire credential, so
  * unknown fields are stripped and every other field is ignored. Whitespace is
  * preserved because a password may legitimately contain spaces.

@@ -195,6 +195,7 @@ export default async function HomePage({
               filters={filters}
               albums={result.data.albums}
               memberships={result.data.memberships}
+              selectable
             />
           )}
         </>

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { callApi } from "@/lib/dashboard-api";
+import { callApi, readBulkAddCounts, readCreatedAlbumId } from "@/lib/dashboard-api";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -89,5 +89,55 @@ describe("callApi", () => {
     );
 
     fetchSpy.mockRestore();
+  });
+});
+
+describe("readCreatedAlbumId", () => {
+  it("reads the new album's id out of the create response", () => {
+    expect(
+      readCreatedAlbumId({ album: { id: "6f1a5d0e", name: "Anime" } }),
+    ).toBe("6f1a5d0e");
+  });
+
+  it.each([
+    ["nothing", undefined],
+    ["null", null],
+    ["a string", "abc"],
+    ["a bare album object", { id: "abc" }],
+    ["a null album", { album: null }],
+    ["an album without an id", { album: { name: "Anime" } }],
+    ["a non-string id", { album: { id: 7 } }],
+    ["an empty id", { album: { id: "" } }],
+  ])("answers null for %s", (_label, payload) => {
+    expect(readCreatedAlbumId(payload)).toBeNull();
+  });
+});
+
+describe("readBulkAddCounts", () => {
+  it("reads the three counts the bulk endpoint reports", () => {
+    expect(readBulkAddCounts({ added: 3, alreadyIn: 2, skipped: 1 })).toEqual({
+      added: 3,
+      alreadyIn: 2,
+      skipped: 1,
+    });
+  });
+
+  it("accepts a report of nothing at all", () => {
+    expect(readBulkAddCounts({ added: 0, alreadyIn: 0, skipped: 0 })).toEqual({
+      added: 0,
+      alreadyIn: 0,
+      skipped: 0,
+    });
+  });
+
+  it.each([
+    ["nothing", undefined],
+    ["null", null],
+    ["a string", "added"],
+    ["a missing count", { added: 1, alreadyIn: 0 }],
+    ["a non-numeric count", { added: "1", alreadyIn: 0, skipped: 0 }],
+    ["a negative count", { added: -1, alreadyIn: 0, skipped: 0 }],
+  ])("answers null for %s", (_label, payload) => {
+    expect(readBulkAddCounts(payload)).toBeNull();
   });
 });

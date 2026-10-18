@@ -21,11 +21,15 @@ const { DELETE: deleteAlbumRoute, PATCH: renameAlbumRoute } = await import(
 const { POST: addMemberRoute } = await import(
   "@/app/api/dashboard/links/[id]/albums/route"
 );
+const { POST: bulkAddRoute } = await import(
+  "@/app/api/dashboard/albums/[id]/links/route"
+);
 const { DELETE: removeMemberRoute } = await import(
   "@/app/api/dashboard/links/[id]/albums/[albumId]/route"
 );
 const { addLinkToAlbum, createAlbum, listAlbums } = await import("@/db/albums");
 const { upsertLink } = await import("@/db/links");
+const { albumLinks } = await import("@/db/schema");
 const { SESSION_COOKIE_NAME, signSession } = await import("@/lib/session");
 
 const PASSWORD = "correct-horse-battery";
@@ -484,6 +488,217 @@ describe("dashboard album routes", () => {
 
       expect(response.status).toBe(401);
       expect((await listAlbums(dbState.db))[0]?.linkCount).toBe(1);
+    });
+  });
+
+  describe("POST /api/dashboard/albums/[id]/links", () => {
+    const context = (id: string) => ({ params: Promise.resolve({ id }) });
+
+    /** Saves `count` links and returns their ids, in insertion order. */
+    async function seedLinks(count: number): Promise<string[]> {
+      const ids: string[] = [];
+
+      for (let index = 0; index < count; index += 1) {
+        const saved = await upsertLink(dbState.db, {
+          url: `https://example.com/article-${index}`,
+          title: `Article ${index}`,
+          thumbnail: null,
+          domain: "example.com",
+        });
+        ids.push(saved.link.id);
+      }
+
+      return ids;
+    }
+
+    it("files every selected link in one request", async () => {
+      const { albumId } = await seed();
+      const ids = await seedLinks(3);
+
+      const response = await bulkAddRoute(
+        jsonRequest(`https://app.test/api/dashboard/albums/${albumId}/links`, "POST", {
+          cookies: [validSessionCookie()],
+          body: { linkIds: ids },
+        }),
+        context(albumId),
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        data: { added: 3, alreadyIn: 0, skipped: 0 },
+      });
+      expect((await listAlbums(dbState.db))[0]?.linkCount).toBe(3);
+    });
+
+    it("reports the links that were already in the album", async () => {
+      const { albumId } = await seed();
+      const ids = await seedLinks(2);
+      await addLinkToAlbum(dbState.db, albumId, ids[0]!);
+
+      const response = await bulkAddRoute(
+        jsonRequest("https://app.test/api/dashboard/albums/x/links", "POST", {
+          cookies: [validSessionCookie()],
+          body: { linkIds: ids },
+        }),
+        context(albumId),
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        data: { added: 1, alreadyIn: 1, skipped: 0 },
+      });
+    });
+
+    it("is idempotent across two requests", async () => {
+      const { albumId } = await seed();
+      const ids = await seedLinks(2);
+      const body = { linkIds: ids };
+
+      await bulkAddRoute(
+        jsonRequest("https://app.test/api/dashboard/albums/x/links", "POST", {
+          cookies: [validSessionCookie()],
+          body,
+        }),
+        context(albumId),
+      );
+      const second = await bulkAddRoute(
+        jsonRequest("https://app.test/api/dashboard/albums/x/links", "POST", {
+          cookies: [validSessionCookie()],
+          body,
+        }),
+        context(albumId),
+      );
+
+      expect(second.status).toBe(200);
+      await expect(second.json()).resolves.toMatchObject({
+        data: { added: 0, alreadyIn: 2, skipped: 0 },
+      });
+    });
+
+    it("skips ids that no longer exist and writes no row for them", async () => {
+      const { albumId } = await seed();
+      const ids = await seedLinks(1);
+
+      const response = await bulkAddRoute(
+        jsonRequest("https://app.test/api/dashboard/albums/x/links", "POST", {
+          cookies: [validSessionCookie()],
+          body: { linkIds: [...ids, "ghost"] },
+        }),
+        context(albumId),
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        data: { added: 1, alreadyIn: 0, skipped: 1 },
+      });
+      await expect(dbState.db.select().from(albumLinks)).resolves.toHaveLength(1);
+    });
+
+    it("answers 404 for an unknown album", async () => {
+      const ids = await seedLinks(1);
+
+      const response = await bulkAddRoute(
+        jsonRequest("https://app.test/api/dashboard/albums/gone/links", "POST", {
+          cookies: [validSessionCookie()],
+          body: { linkIds: ids },
+        }),
+        context("gone"),
+      );
+
+      expect(response.status).toBe(404);
+      await expect(dbState.db.select().from(albumLinks)).resolves.toHaveLength(0);
+    });
+
+    it.each([
+      ["a missing field", { body: {} }],
+      ["an empty list", { body: { linkIds: [] } }],
+      ["a string instead of an array", { body: { linkIds: "abc" } }],
+      ["a blank entry", { body: { linkIds: [""] } }],
+      [
+        "more ids than the cap",
+        { body: { linkIds: Array.from({ length: 201 }, (_, i) => `id-${i}`) } },
+      ],
+      ["a body that is not JSON", { raw: "{" }],
+    ])("rejects %s", async (_label, payload) => {
+      const { albumId } = await seed();
+
+      const response = await bulkAddRoute(
+        jsonRequest("https://app.test/api/dashboard/albums/x/links", "POST", {
+          cookies: [validSessionCookie()],
+          ...payload,
+        }),
+        context(albumId),
+      );
+
+      expect(response.status).toBe(400);
+      await expect(dbState.db.select().from(albumLinks)).resolves.toHaveLength(0);
+    });
+
+    it("refuses a visitor with no session", async () => {
+      const { albumId } = await seed();
+      const ids = await seedLinks(2);
+
+      const response = await bulkAddRoute(
+        jsonRequest("https://app.test/api/dashboard/albums/x/links", "POST", {
+          body: { linkIds: ids },
+        }),
+        context(albumId),
+      );
+
+      expect(response.status).toBe(401);
+      await expect(dbState.db.select().from(albumLinks)).resolves.toHaveLength(0);
+    });
+
+    it("answers 503 when the dashboard password is not set", async () => {
+      vi.stubEnv("DASHBOARD_PASSWORD", "");
+      const { albumId } = await seed();
+      const ids = await seedLinks(1);
+
+      const response = await bulkAddRoute(
+        jsonRequest("https://app.test/api/dashboard/albums/x/links", "POST", {
+          cookies: [validSessionCookie()],
+          body: { linkIds: ids },
+        }),
+        context(albumId),
+      );
+
+      expect(response.status).toBe(503);
+    });
+
+    it("logs the add under its own event name", async () => {
+      const { albumId } = await seed();
+      const ids = await seedLinks(2);
+
+      await bulkAddRoute(
+        jsonRequest("https://app.test/api/dashboard/albums/x/links", "POST", {
+          cookies: [validSessionCookie()],
+          body: { linkIds: ids },
+        }),
+        context(albumId),
+      );
+
+      const events = infoSpy.mock.calls.map((call: unknown[]) =>
+        JSON.parse(String(call[0])).event,
+      );
+      expect(events).toContain("dashboard_album_links_added");
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it("logs a refused add as an error", async () => {
+      const { albumId } = await seed();
+
+      await bulkAddRoute(
+        jsonRequest("https://app.test/api/dashboard/albums/x/links", "POST", {
+          cookies: [validSessionCookie()],
+          body: { linkIds: [] },
+        }),
+        context(albumId),
+      );
+
+      const events = errorSpy.mock.calls.map((call: unknown[]) =>
+        JSON.parse(String(call[0])).event,
+      );
+      expect(events).toContain("dashboard_album_links_add_failed");
     });
   });
 
