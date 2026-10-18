@@ -14,7 +14,14 @@ import {
 
 import type { LinkInput } from "@/lib/validation";
 import type { Database } from "./client";
-import { links, lockedDomains, type Link, type NewLink } from "./schema";
+import {
+  albumLinks,
+  links,
+  lockedDomains,
+  type Link,
+  type NewLink,
+} from "./schema";
+import { escapeLikePattern, isUniqueViolation } from "./sql-support";
 
 export interface UpsertResult {
   link: Link;
@@ -48,6 +55,13 @@ export interface ListLinksOptions extends ScopeOptions {
   query?: string;
   /** `true` keeps only starred links; `false` (the default) applies no filter. */
   favorite?: boolean;
+  /** Only links that belong to this album. Omitted means "no album filter". */
+  albumId?: string;
+}
+
+/** Options for the count helpers: a scope, and optionally one album. */
+export interface CountLinksOptions extends ScopeOptions {
+  albumId?: string;
 }
 
 /** One entry of the dashboard's domain dropdown. */
@@ -70,24 +84,29 @@ export type UpdateLinkResult =
   | { ok: false; reason: "not-found" | "url-taken" };
 
 /**
- * Escapes the characters `LIKE` would otherwise treat as wildcards, so a search
- * for `100%` means "100%" rather than "100 followed by anything".
- */
-function escapeLikePattern(value: string): string {
-  return value.replace(/[\\%_]/g, (character) => `\\${character}`);
-}
-
-/**
  * The hidden/visible half of a query, as a subquery against `locked_domains`.
  * `locked_domains.domain` is the primary key, so it can never be NULL and
  * `NOT IN` cannot be tripped up by one. `all` needs no condition at all.
+ *
+ * Exported because the album queries enforce exactly the same rule: a shared
+ * fragment is what keeps an album tile from leaking a hidden link.
  */
-function scopeCondition(scope: LinkScope): SQL | undefined {
+export function scopeCondition(scope: LinkScope): SQL | undefined {
   if (scope === "all") return undefined;
 
   return scope === "locked"
     ? sql`${links.domain} IN (SELECT ${lockedDomains.domain} FROM ${lockedDomains})`
     : sql`${links.domain} NOT IN (SELECT ${lockedDomains.domain} FROM ${lockedDomains})`;
+}
+
+/**
+ * The "is this link in that album?" half of a query, as a subquery against
+ * `album_links`. `undefined` (no album filter) needs no condition at all.
+ */
+function albumCondition(albumId: string | undefined): SQL | undefined {
+  if (albumId === undefined) return undefined;
+
+  return sql`${links.id} IN (SELECT ${albumLinks.linkId} FROM ${albumLinks} WHERE ${albumLinks.albumId} = ${albumId})`;
 }
 
 /**
@@ -167,6 +186,11 @@ export async function listLinks(
     conditions.push(scope);
   }
 
+  const album = albumCondition(options.albumId);
+  if (album !== undefined) {
+    conditions.push(album);
+  }
+
   if (options.domain) {
     conditions.push(eq(links.domain, options.domain));
   }
@@ -208,15 +232,24 @@ export async function listLinks(
  * Deliberately ignores the other filters: the dropdown must always be able to
  * offer the domain a visitor wants to switch to. A row whose backfilled domain
  * came out empty is skipped, because `""` is not a meaningful choice.
+ *
+ * With an `albumId`, the list narrows to the domains that appear *in that album*,
+ * so the album page's dropdown cannot offer a domain that would show nothing.
  */
 export async function listDomains(
   db: Database,
-  options: ScopeOptions = {},
+  options: CountLinksOptions = {},
 ): Promise<DomainOption[]> {
   return db
     .select({ domain: links.domain, count: count() })
     .from(links)
-    .where(and(ne(links.domain, ""), scopeCondition(options.scope ?? "visible")))
+    .where(
+      and(
+        ne(links.domain, ""),
+        scopeCondition(options.scope ?? "visible"),
+        albumCondition(options.albumId),
+      ),
+    )
     .groupBy(links.domain)
     .orderBy(asc(links.domain));
 }
@@ -235,15 +268,20 @@ export async function listAllDomains(db: Database): Promise<DomainOption[]> {
     .orderBy(asc(links.domain));
 }
 
-/** Number of links on one side of the divide, so the dashboard can say "3 of 12". */
+/**
+ * Number of links on one side of the divide, so the dashboard can say "3 of 12".
+ * With an `albumId`, it counts that album's links instead of the whole list.
+ */
 export async function countLinks(
   db: Database,
-  options: ScopeOptions = {},
+  options: CountLinksOptions = {},
 ): Promise<number> {
   const rows = await db
     .select({ value: count() })
     .from(links)
-    .where(scopeCondition(options.scope ?? "visible"));
+    .where(
+      and(scopeCondition(options.scope ?? "visible"), albumCondition(options.albumId)),
+    );
 
   return rows[0]?.value ?? 0;
 }
@@ -326,22 +364,27 @@ export async function updateLink(
   }
 }
 
-/** Permanently removes a link. Reports `false` when there was nothing to delete. */
+/**
+ * Permanently removes a link. Reports `false` when there was nothing to delete.
+ *
+ * The link's album memberships go with it (`album_links` has no cascade, because
+ * the project never enables `PRAGMA foreign_keys`), so a deleted link cannot keep
+ * counting towards an album or contribute a cover from beyond the grave.
+ */
 export async function deleteLink(db: Database, id: string): Promise<boolean> {
   const removed = await db.delete(links).where(eq(links.id, id)).returning();
 
-  return removed.length > 0;
+  if (removed.length === 0) {
+    return false;
+  }
+
+  await db.delete(albumLinks).where(eq(albumLinks.linkId, id));
+
+  return true;
 }
 
 async function getLinkByUrl(db: Database, url: string): Promise<Link | undefined> {
   const rows = await db.select().from(links).where(eq(links.url, url)).limit(1);
 
   return rows[0];
-}
-
-/** libSQL reports a unique-index clash in the error message, not a stable code. */
-function isUniqueViolation(error: unknown): boolean {
-  const text = error instanceof Error ? error.message : String(error);
-
-  return /unique constraint/i.test(text);
 }

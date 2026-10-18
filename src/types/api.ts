@@ -1,4 +1,4 @@
-import type { Link } from "@/db/schema";
+import type { Album, Link } from "@/db/schema";
 
 export type ApiErrorCode =
   | "UNAUTHORIZED"
@@ -49,6 +49,25 @@ export function toApiLink(row: Link): ApiLink {
     isFavorite: row.isFavorite,
     createdAt: new Date(row.createdAt).toISOString(),
     updatedAt: new Date(row.updatedAt).toISOString(),
+  };
+}
+
+/**
+ * Wire representation of an album. `nameKey` is deliberately not exposed: it is
+ * an implementation detail of the uniqueness rule, and the client only ever needs
+ * the label it typed.
+ */
+export interface ApiAlbum {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
+export function toApiAlbum(row: Album): ApiAlbum {
+  return {
+    id: row.id,
+    name: row.name,
+    createdAt: new Date(row.createdAt).toISOString(),
   };
 }
 

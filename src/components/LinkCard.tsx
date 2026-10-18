@@ -1,4 +1,5 @@
 import { LinkActions } from "@/components/LinkActions";
+import type { AlbumOption } from "@/db/albums";
 import type { Link } from "@/db/schema";
 import { formatRelativeTime } from "@/lib/time";
 
@@ -15,14 +16,30 @@ export interface LinkCardProps {
   link: Link;
   /** True on the locked page; passed down so an expired passcode redirects. */
   locked?: boolean;
+  /** Every album, for the "add to album" popup. */
+  albums?: readonly AlbumOption[];
+  /** Albums this link belongs to, as the server last reported. */
+  memberAlbumIds?: readonly string[];
+  /** Set on an album's page, where "remove from this album" makes sense. */
+  removeFromAlbumId?: string;
 }
 
-export function LinkCard({ link, locked = false }: LinkCardProps) {
+export function LinkCard({
+  link,
+  locked = false,
+  albums,
+  memberAlbumIds,
+  removeFromAlbumId,
+}: LinkCardProps) {
   const host = link.domain === "" ? hostOf(link.url) : link.domain;
 
   return (
-    <article className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900">
-      <div className="relative flex aspect-video items-center justify-center overflow-hidden bg-slate-100 dark:bg-slate-800">
+    <article className="flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900">
+      {/*
+        The rounding and the clipping live on the cover, not on the card, so the
+        "add to album" popup can overflow the card instead of being cut off.
+      */}
+      <div className="relative flex aspect-video items-center justify-center overflow-hidden rounded-t-xl bg-slate-100 dark:bg-slate-800">
         {link.thumbnail ? (
           // Plain <img> on purpose: thumbnails come from arbitrary third-party
           // hosts, and next/image would add remote-pattern config plus Vercel
@@ -86,7 +103,13 @@ export function LinkCard({ link, locked = false }: LinkCardProps) {
           Open link
         </a>
 
-        <LinkActions link={link} locked={locked} />
+        <LinkActions
+          link={link}
+          locked={locked}
+          albums={albums}
+          memberAlbumIds={memberAlbumIds}
+          removeFromAlbumId={removeFromAlbumId}
+        />
       </div>
     </article>
   );

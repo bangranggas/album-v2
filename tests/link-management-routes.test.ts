@@ -15,6 +15,7 @@ vi.mock("@/db/client", async (importOriginal) => {
 const { POST } = await import("@/app/api/dashboard/links/route");
 const { DELETE, PATCH } = await import("@/app/api/dashboard/links/[id]/route");
 const { listLinks, upsertLink } = await import("@/db/links");
+const { addLinkToAlbum, createAlbum, listAlbums } = await import("@/db/albums");
 const { lockDomain } = await import("@/db/locked-domains");
 const { SESSION_COOKIE_NAME, signSession } = await import("@/lib/session");
 
@@ -411,6 +412,31 @@ describe("dashboard link routes", () => {
       await expect(response.json()).resolves.toEqual({ ok: true, data: { deleted: true } });
       expect(await listLinks(testDatabase!.db)).toEqual([]);
       expect(emittedEvents(infoSpy)).toContain("dashboard_link_deleted");
+    });
+
+    it("takes the deleted link out of its albums", async () => {
+      const saved = await upsertLink(testDatabase!.db, {
+        url: created.url,
+        title: created.title,
+        thumbnail: null,
+        domain: "example.com",
+      });
+      const album = await createAlbum(testDatabase!.db, {
+        name: "Anime",
+        nameKey: "anime",
+      });
+      if (!album.ok) throw new Error("setup failed");
+      await addLinkToAlbum(testDatabase!.db, album.album.id, saved.link.id);
+
+      await DELETE(
+        jsonRequest(`https://app.test/api/dashboard/links/${saved.link.id}`, "DELETE", {
+          cookies: [validSessionCookie()],
+        }),
+        { params: Promise.resolve({ id: saved.link.id }) },
+      );
+
+      // No orphan membership: the album stops counting and stops showing a cover.
+      expect((await listAlbums(testDatabase!.db))[0]?.linkCount).toBe(0);
     });
 
     it("deletes a link inside a locked domain", async () => {

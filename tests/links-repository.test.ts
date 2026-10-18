@@ -10,6 +10,7 @@ import {
   updateLink,
   upsertLink,
 } from "@/db/links";
+import { addLinkToAlbum, createAlbum } from "@/db/albums";
 import { lockDomain, unlockDomain } from "@/db/locked-domains";
 import { links } from "@/db/schema";
 import type { LinkInput } from "@/lib/validation";
@@ -894,5 +895,136 @@ describe("deleteLink", () => {
 
     expect(await deleteLink(db, saved.link.id)).toBe(true);
     expect(await countLinks(db, { scope: "locked" })).toBe(0);
+  });
+});
+
+describe("album filter", () => {
+  let testDatabase: TestDatabase | undefined;
+
+  afterEach(async () => {
+    await testDatabase?.cleanup();
+    testDatabase = undefined;
+  });
+
+  /** Two albums over four links, two of which live on a hidden domain. */
+  async function seedAlbum(db: TestDatabase["db"]): Promise<string> {
+    const created = await createAlbum(db, { name: "Anime", nameKey: "anime" });
+    if (!created.ok) throw new Error("setup failed");
+
+    const entries: LinkInput[] = [
+      {
+        url: "https://example.com/one",
+        domain: "example.com",
+        title: "One",
+        thumbnail: null,
+      },
+      {
+        url: "https://example.com/two",
+        domain: "example.com",
+        title: "Two",
+        thumbnail: null,
+      },
+      {
+        url: "https://hidden.example/three",
+        domain: "hidden.example",
+        title: "Three",
+        thumbnail: null,
+      },
+    ];
+
+    for (const entry of entries) {
+      const saved = await upsertLink(db, entry);
+      await addLinkToAlbum(db, created.album.id, saved.link.id);
+    }
+
+    await upsertLink(db, {
+      url: "https://example.com/loose",
+      domain: "example.com",
+      title: "Loose",
+      thumbnail: null,
+    });
+
+    return created.album.id;
+  }
+
+  it("keeps only the links that belong to the album", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const albumId = await seedAlbum(db);
+
+    const rows = await listLinks(db, { albumId });
+
+    expect(rows.map((row) => row.title).sort()).toEqual(["One", "Three", "Two"]);
+  });
+
+  it("counts the album, not the whole list", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const albumId = await seedAlbum(db);
+
+    expect(await countLinks(db, { albumId })).toBe(3);
+    expect(await countLinks(db)).toBe(4);
+  });
+
+  it("counts the album on one side of the divide only", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const albumId = await seedAlbum(db);
+    await lockDomain(db, "hidden.example");
+
+    expect(await countLinks(db, { albumId })).toBe(2);
+    expect(await countLinks(db, { albumId, scope: "locked" })).toBe(1);
+  });
+
+  it("offers only the domains that appear inside the album", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const albumId = await seedAlbum(db);
+
+    expect(await listDomains(db, { albumId })).toEqual([
+      { domain: "example.com", count: 2 },
+      { domain: "hidden.example", count: 1 },
+    ]);
+    await lockDomain(db, "hidden.example");
+    expect(await listDomains(db, { albumId })).toEqual([
+      { domain: "example.com", count: 2 },
+    ]);
+  });
+
+  it("never returns the other side's links, even inside an album", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const albumId = await seedAlbum(db);
+    await lockDomain(db, "hidden.example");
+
+    const visible = await listLinks(db, { albumId });
+    const locked = await listLinks(db, { albumId, scope: "locked" });
+
+    expect(visible.map((row) => row.title).sort()).toEqual(["One", "Two"]);
+    expect(locked.map((row) => row.title)).toEqual(["Three"]);
+  });
+
+  it("combines an album with the search and favorite filters", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const albumId = await seedAlbum(db);
+
+    expect(await listLinks(db, { albumId, query: "tw" })).toHaveLength(1);
+
+    const saved = await listLinks(db, { albumId, query: "Tw" });
+    const titleOnly = saved[0];
+    if (titleOnly === undefined) throw new Error("setup failed");
+    await updateLink(db, titleOnly.id, { isFavorite: true });
+
+    expect(await listLinks(db, { albumId, favorite: true })).toHaveLength(1);
+  });
+
+  it("returns nothing for an unknown album", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seedAlbum(db);
+
+    expect(await listLinks(db, { albumId: "nope" })).toEqual([]);
+    expect(await countLinks(db, { albumId: "nope" })).toBe(0);
   });
 });

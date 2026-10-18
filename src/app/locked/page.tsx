@@ -2,12 +2,17 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { AddLinkForm } from "@/components/AddLinkForm";
+import { AlbumCreateForm } from "@/components/AlbumCreateForm";
+import { AlbumGrid } from "@/components/AlbumGrid";
+import { AlbumSearch } from "@/components/AlbumSearch";
+import { DashboardTabs } from "@/components/DashboardTabs";
 import { LinkFilters } from "@/components/LinkFilters";
 import { LinkGrid } from "@/components/LinkGrid";
 import { LockedDomainsPanel } from "@/components/LockedDomainsPanel";
 import { LockedHeader } from "@/components/LockedHeader";
 import { PasscodeNotConfigured } from "@/components/PasscodeNotConfigured";
 import { SetupProblem } from "@/components/SetupProblem";
+import { countAlbums, listAlbumIdsByLink, listAlbumOptions, listAlbums, type AlbumOption, type AlbumSummary } from "@/db/albums";
 import { getDb } from "@/db/client";
 import {
   countLinks,
@@ -18,10 +23,14 @@ import {
 } from "@/db/links";
 import { listLockedDomains, type LockedDomainOption } from "@/db/locked-domains";
 import type { Link } from "@/db/schema";
+import { formatAlbumCount } from "@/lib/albums";
 import {
   formatLinkCount,
   hasActiveFilters,
+  resolveAlbumQuery,
   resolveLinkFilters,
+  resolveTab,
+  type DashboardTab,
   type LinkFilters as FilterValues,
 } from "@/lib/link-filters";
 import { evaluateLockedGate, type LockedGate } from "@/lib/locked-auth";
@@ -43,7 +52,21 @@ interface LockedData {
   /** Every domain with links, as suggestions when locking a new one. */
   suggestions: string[];
   total: number;
+  /** Every album, for the per-card "add to album" popup. */
+  albums: AlbumOption[];
+  /** Albums per link id, for the same popup's checkboxes. */
+  memberships: Map<string, string[]>;
 }
+
+interface AlbumsData {
+  albums: AlbumSummary[];
+  total: number;
+}
+
+type TabResult =
+  | { kind: "links"; data: LockedData }
+  | { kind: "albums"; data: AlbumsData }
+  | { kind: "problem"; message: string };
 
 /**
  * Module-scope helper (not a component) so reading the clock and the cookie jar
@@ -59,46 +82,80 @@ async function readGate(): Promise<LockedGate> {
   });
 }
 
-async function loadLocked(
+async function loadLinks(filters: FilterValues): Promise<LockedData> {
+  const db = getDb();
+
+  const [links, domains, lockedDomains, allDomains, total, albums] = await Promise.all([
+    listLinks(db, {
+      limit: PAGE_LIMIT,
+      domain: filters.domain,
+      query: filters.query,
+      favorite: filters.favorite,
+      scope: "locked",
+    }),
+    listDomains(db, { scope: "locked" }),
+    listLockedDomains(db),
+    listAllDomains(db),
+    countLinks(db, { scope: "locked" }),
+    listAlbumOptions(db),
+  ]);
+
+  // One query for the whole page's memberships, rather than one per card.
+  const memberships = await listAlbumIdsByLink(
+    db,
+    links.map((link) => link.id),
+  );
+
+  return {
+    links,
+    domains,
+    lockedDomains,
+    suggestions: allDomains.map((option) => option.domain),
+    total,
+    albums,
+    memberships,
+  };
+}
+
+/**
+ * The albums of the hidden area: the same list as `/`, counted and covered from
+ * the hidden side only. Album names are shared between the two pages on purpose —
+ * they are labels, not link data.
+ */
+async function loadAlbums(query: string): Promise<AlbumsData> {
+  const db = getDb();
+
+  const [albums, total] = await Promise.all([
+    listAlbums(db, { scope: "locked", query, limit: PAGE_LIMIT }),
+    countAlbums(db),
+  ]);
+
+  return { albums, total };
+}
+
+async function loadTab(
+  tab: DashboardTab,
   filters: FilterValues,
-): Promise<{ data: LockedData; problem?: undefined } | { data?: undefined; problem: string }> {
+  albumQuery: string,
+): Promise<TabResult> {
   try {
-    const db = getDb();
-
-    const [links, domains, lockedDomains, allDomains, total] = await Promise.all([
-      listLinks(db, {
-        limit: PAGE_LIMIT,
-        domain: filters.domain,
-        query: filters.query,
-        favorite: filters.favorite,
-        scope: "locked",
-      }),
-      listDomains(db, { scope: "locked" }),
-      listLockedDomains(db),
-      listAllDomains(db),
-      countLinks(db, { scope: "locked" }),
-    ]);
-
-    return {
-      data: {
-        links,
-        domains,
-        lockedDomains,
-        suggestions: allDomains.map((option) => option.domain),
-        total,
-      },
-    };
+    return tab === "albums"
+      ? { kind: "albums", data: await loadAlbums(albumQuery) }
+      : { kind: "links", data: await loadLinks(filters) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    logEvent("locked_dashboard_load_failed", { message }, "error");
+    logEvent("locked_dashboard_load_failed", { tab, message }, "error");
 
-    return { problem: "The hidden list could not read from the database." };
+    return {
+      kind: "problem",
+      message: "The hidden list could not read from the database.",
+    };
   }
 }
 
 /**
- * The hidden dashboard: the same list, the same filters, and the same card
- * actions as `/`, but scoped to locked domains and behind the passcode.
+ * The hidden dashboard: the same list, the same filters, the same tabs, and the
+ * same card actions as `/`, but scoped to locked domains and behind the passcode.
  */
 export default async function LockedPage({
   searchParams,
@@ -119,34 +176,61 @@ export default async function LockedPage({
     redirect(`${BASE_PATH}/unlock?next=%2Flocked`);
   }
 
-  const filters = resolveLinkFilters(await searchParams);
+  const params = await searchParams;
+  const tab = resolveTab(params);
+  const filters = resolveLinkFilters(params);
+  const albumQuery = resolveAlbumQuery(params);
   const filtering = hasActiveFilters(filters);
-  const { data, problem } = await loadLocked(filters);
+  const result = await loadTab(tab, filters, albumQuery);
+
+  const countLine =
+    result.kind === "links" && result.data.total > 0
+      ? formatLinkCount(result.data.links.length, result.data.total, filtering)
+      : result.kind === "albums" && result.data.total > 0
+        ? formatAlbumCount(
+            result.data.albums.length,
+            result.data.total,
+            albumQuery !== "",
+          )
+        : null;
 
   return (
     <main>
       <LockedHeader />
 
-      {problem !== undefined ? (
-        <SetupProblem message={problem} />
+      {/*
+        Rendered before the content, so the way back to the other tab is always
+        there — including in the "no hidden links yet" state below.
+      */}
+      <DashboardTabs active={tab} basePath={BASE_PATH} />
+
+      {result.kind === "problem" ? (
+        <SetupProblem message={result.message} />
+      ) : result.kind === "albums" ? (
+        <>
+          {countLine === null ? null : (
+            <p className="mb-4 text-sm text-slate-500">{countLine}</p>
+          )}
+          <AlbumCreateForm locked />
+          <AlbumSearch query={albumQuery} />
+          <AlbumGrid albums={result.data.albums} basePath={BASE_PATH} locked query={albumQuery} />
+        </>
       ) : (
         <>
           <LockedDomainsPanel
-            domains={data.lockedDomains}
-            suggestions={data.suggestions}
+            domains={result.data.lockedDomains}
+            suggestions={result.data.suggestions}
           />
 
-          {data.total > 0 ? (
-            <p className="mb-4 text-sm text-slate-500">
-              {formatLinkCount(data.links.length, data.total, filtering)}
-            </p>
-          ) : null}
+          {countLine === null ? null : (
+            <p className="mb-4 text-sm text-slate-500">{countLine}</p>
+          )}
 
           <AddLinkForm
-            lockedDomains={data.lockedDomains.map((entry) => entry.domain)}
+            lockedDomains={result.data.lockedDomains.map((entry) => entry.domain)}
           />
 
-          {data.total === 0 && !filtering ? (
+          {result.data.total === 0 && !filtering ? (
             <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-8 text-center">
               <h2 className="text-base font-semibold text-slate-100">
                 No hidden links yet
@@ -158,16 +242,14 @@ export default async function LockedPage({
             </div>
           ) : (
             <>
-              <LinkFilters
-                domains={data.domains}
-                filters={filters}
-                basePath={BASE_PATH}
-              />
+              <LinkFilters domains={result.data.domains} filters={filters} />
               <LinkGrid
-                links={data.links}
+                links={result.data.links}
                 filters={filters}
                 basePath={BASE_PATH}
                 locked
+                albums={result.data.albums}
+                memberships={result.data.memberships}
               />
             </>
           )}

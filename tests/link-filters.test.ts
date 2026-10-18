@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildAlbumsHref,
   buildLinksHref,
+  buildTabHref,
   formatLinkCount,
   hasActiveFilters,
+  MAX_ALBUM_QUERY_LENGTH,
   MAX_DOMAIN_LENGTH,
   MAX_QUERY_LENGTH,
+  resolveAlbumQuery,
   resolveLinkFilters,
+  resolveTab,
   type LinkFilters,
 } from "@/lib/link-filters";
 
@@ -196,5 +201,119 @@ describe("formatLinkCount", () => {
   it("handles an empty result set", () => {
     expect(formatLinkCount(0, 5, true)).toBe("0 of 5 links");
     expect(formatLinkCount(0, 0, false)).toBe("0 links");
+  });
+});
+
+describe("resolveTab", () => {
+  it("defaults to the links tab", () => {
+    expect(resolveTab({})).toBe("links");
+  });
+
+  it.each(["albums", "album", "Albums", "ALBUMS"])(
+    "reads %s as the albums tab",
+    (value) => {
+      expect(resolveTab({ tab: value })).toBe("albums");
+    },
+  );
+
+  it.each(["links", "", "junk", "album 1"])(
+    "reads %s as the links tab",
+    (value) => {
+      expect(resolveTab({ tab: value })).toBe("links");
+    },
+  );
+
+  it("uses the first value when the parameter repeats", () => {
+    expect(resolveTab({ tab: ["albums", "links"] })).toBe("albums");
+    expect(resolveTab({ tab: ["links", "albums"] })).toBe("links");
+  });
+});
+
+describe("resolveAlbumQuery", () => {
+  it("is empty without a parameter", () => {
+    expect(resolveAlbumQuery({})).toBe("");
+  });
+
+  it("keeps and trims the album search", () => {
+    expect(resolveAlbumQuery({ aq: "  Anime  " })).toBe("Anime");
+  });
+
+  it("treats a whitespace-only value as no search", () => {
+    expect(resolveAlbumQuery({ aq: "   " })).toBe("");
+  });
+
+  it("caps an over-long value", () => {
+    expect(
+      resolveAlbumQuery({ aq: "a".repeat(MAX_ALBUM_QUERY_LENGTH + 20) }),
+    ).toHaveLength(MAX_ALBUM_QUERY_LENGTH);
+  });
+
+  it("ignores the links tab's own query parameter", () => {
+    expect(resolveAlbumQuery({ q: "anime" })).toBe("");
+  });
+
+  it("uses the first value when the parameter repeats", () => {
+    expect(resolveAlbumQuery({ aq: ["one", "two"] })).toBe("one");
+  });
+
+  it("does not throw on an empty repeated parameter", () => {
+    expect(resolveAlbumQuery({ aq: [] })).toBe("");
+  });
+});
+
+describe("buildTabHref", () => {
+  it("points the links tab at the bare path", () => {
+    expect(buildTabHref("links")).toBe("/");
+  });
+
+  it("marks the albums tab in the query string", () => {
+    expect(buildTabHref("albums")).toBe("/?tab=albums");
+  });
+
+  it("supports the locked base path", () => {
+    expect(buildTabHref("albums", "/locked")).toBe("/locked?tab=albums");
+  });
+
+  it("drops the other tab's filters, so switching tabs starts clean", () => {
+    expect(buildTabHref("albums")).not.toContain("q=");
+    expect(buildTabHref("links")).not.toContain("tab=");
+  });
+
+  it("round-trips through resolveTab", () => {
+    expect(resolveTab(Object.fromEntries(searchOf(buildTabHref("albums"))))).toBe(
+      "albums",
+    );
+    expect(resolveTab(Object.fromEntries(searchOf(buildTabHref("links"))))).toBe(
+      "links",
+    );
+  });
+});
+
+describe("buildAlbumsHref", () => {
+  it("keeps the albums tab with no search", () => {
+    expect(buildAlbumsHref("")).toBe("/?tab=albums");
+  });
+
+  it("writes the album search after the tab", () => {
+    expect(buildAlbumsHref("Anime")).toBe("/?tab=albums&aq=Anime");
+  });
+
+  it("encodes characters that cannot appear raw in a URL", () => {
+    const href = buildAlbumsHref("my album & more");
+
+    expect(href).not.toContain(" ");
+    expect(searchOf(href).get("aq")).toBe("my album & more");
+  });
+
+  it("supports the locked base path", () => {
+    expect(buildAlbumsHref("Anime", "/locked")).toBe("/locked?tab=albums&aq=Anime");
+  });
+
+  it("round-trips through the resolvers", () => {
+    const href = buildAlbumsHref("Anime");
+    const params = Object.fromEntries(searchOf(href));
+
+    expect(resolveTab(params)).toBe("albums");
+    expect(resolveAlbumQuery(params)).toBe("Anime");
   });
 });

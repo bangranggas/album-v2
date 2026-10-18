@@ -338,6 +338,82 @@ export function parseLockedDomain(raw: unknown): ParseResult<LockedDomainInput> 
 }
 
 /**
+ * Longest album name accepted. Generous for a label, small enough that the tab
+ * list and the per-card popup stay readable.
+ */
+export const MAX_ALBUM_NAME_LENGTH = 100;
+
+/** Album ids are UUIDs; the cap only guards the column and the URL segment. */
+const MAX_ALBUM_ID_LENGTH = 100;
+
+export interface AlbumNameInput {
+  /** The label as typed (trimmed), which is what the UI shows. */
+  name: string;
+  /**
+   * `name.toLowerCase()`. This is the value the unique index stores, so `Anime`
+   * and `anime` can never both exist. Stored rather than computed in SQL so the
+   * constraint is a plain column index and stays portable.
+   */
+  nameKey: string;
+}
+
+export interface AlbumLinkInput {
+  albumId: string;
+}
+
+const albumNameSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "is required")
+    .max(
+      MAX_ALBUM_NAME_LENGTH,
+      `must be at most ${MAX_ALBUM_NAME_LENGTH} characters`,
+    ),
+});
+
+/**
+ * An album name, with its uniqueness key. Whitespace is trimmed at the ends but
+ * kept inside, because "My Album" and "My  Album" are different labels; the case
+ * is preserved for display and only folded into the key.
+ */
+export function parseAlbumName(raw: unknown): ParseResult<AlbumNameInput> {
+  if (!isPlainObject(raw)) {
+    return { ok: false, message: "payload: must be a JSON object" };
+  }
+
+  const result = albumNameSchema.safeParse(raw);
+  if (!result.success) {
+    return { ok: false, message: describeIssue(result.error) };
+  }
+
+  const name = result.data.name;
+
+  return { ok: true, data: { name, nameKey: name.toLowerCase() } };
+}
+
+const albumLinkSchema = z.object({
+  albumId: z
+    .string()
+    .trim()
+    .min(1, "is required")
+    .max(MAX_ALBUM_ID_LENGTH, `must be at most ${MAX_ALBUM_ID_LENGTH} characters`),
+});
+
+export function parseAlbumLinkInput(raw: unknown): ParseResult<AlbumLinkInput> {
+  if (!isPlainObject(raw)) {
+    return { ok: false, message: "payload: must be a JSON object" };
+  }
+
+  const result = albumLinkSchema.safeParse(raw);
+  if (!result.success) {
+    return { ok: false, message: describeIssue(result.error) };
+  }
+
+  return { ok: true, data: { albumId: result.data.albumId } };
+}
+
+/**
  * The dashboard has no usernames: a single password is the entire credential, so
  * unknown fields are stripped and every other field is ignored. Whitespace is
  * preserved because a password may legitimately contain spaces.

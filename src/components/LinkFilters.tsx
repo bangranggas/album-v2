@@ -23,8 +23,6 @@ const FIELD =
 export interface LinkFiltersProps {
   domains: readonly { domain: string; count: number }[];
   filters: FilterValues;
-  /** Where the filters are written and cleared; `/` or `/locked`. */
-  basePath?: string;
   /** The light dashboard shows the lock icon; the locked page does not need it. */
   showLockButton?: boolean;
 }
@@ -32,7 +30,6 @@ export interface LinkFiltersProps {
 export function LinkFilters({
   domains,
   filters,
-  basePath = "/",
   showLockButton = false,
 }: LinkFiltersProps) {
   const router = useRouter();

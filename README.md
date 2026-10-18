@@ -9,6 +9,8 @@ server never scrapes anything and can run entirely on free tiers.
   Sign-in is a dedicated page (`/login`) with a single password field, no username.
 - **Link management:** star a link as a favorite, edit its title/URL/thumbnail, delete it, or
   add one by hand — from the dashboard.
+- **Albums:** a second tab on both dashboards (`?tab=albums`) where links can be grouped into
+  named collections. A link can sit in several albums, and the link itself never moves.
 - **Locked area:** `/locked` — a dark, passcode-protected page where domains can be marked as
   hidden. Their links disappear from `/` entirely and live only there.
 - **Read API:** `GET /api/links` — secret-key protected JSON.
@@ -16,8 +18,9 @@ server never scrapes anything and can run entirely on free tiers.
 
 Planning and design documents live in [`docs/instant-link-collector/`](docs/instant-link-collector),
 the login page / navbar work in [`docs/dashboard-login-navbar/`](docs/dashboard-login-navbar),
-the filter work in [`docs/dashboard-filters/`](docs/dashboard-filters), and the locked area /
-link management in [`docs/locked-domains-and-link-management/`](docs/locked-domains-and-link-management).
+the filter work in [`docs/dashboard-filters/`](docs/dashboard-filters), the locked area /
+link management in [`docs/locked-domains-and-link-management/`](docs/locked-domains-and-link-management),
+and albums in [`docs/albums/`](docs/albums).
 
 ---
 
@@ -316,6 +319,41 @@ Every card has three controls: a star (favorite), a pencil (edit), and a trash c
   title is derived from the URL, e.g. `example.com/article`. Pasting a URL that is already
   saved updates that row instead of failing.
 
+### Albums
+
+`/` and `/locked` each have two tabs: **Links** (everything above) and **Albums**. An album is
+a *named set of links*; nothing is copied, so favorites, editing, and deleting keep working on
+the original link, and the same link can sit in several albums.
+
+| Parameter | Meaning |
+| --- | --- |
+| `?tab=albums` | Opens the Albums tab. Anything else (including no parameter) is the Links tab. |
+| `?aq=` | Album-name search, case-insensitive. The links tab keeps `q` / `domain` / `favorite`, and each tab ignores the other's parameters. |
+
+- **The album list** shows every album, ordered by name, with a 2×2 collage of the four most
+  recently updated thumbnails in it, its name, and how many links it holds *on that page's
+  side*. One thumbnail fills the whole tile; an album without thumbnails shows a grey tile
+  named after its first domain, and an empty one shows a folder glyph. `New album` creates one,
+  and the search box narrows the list.
+- **The album page** (`/albums/<id>`, or `/locked/albums/<id>` in the hidden area) shows the
+  album's links in the usual grid, with the full filter set — search, domain, favorites —
+  applied *inside* the album. Its count line reads `N of M links`.
+- **Adding a link to albums** happens from the card: the folder button opens a small panel
+  listing every album as a checkbox (ticked = already in it). Checking adds, unchecking removes,
+  and `+ New album…` creates one and files the link into it in the same flow. No browser
+  popups: the panel closes on `Done`, `Escape`, or a click outside.
+- **Managing an album**: the pencil renames it (inline), the trash can asks for confirmation
+  inside the card, and both are permanent in the same way link deletes are. Deleting an album
+  deletes only the album — its links stay on the main list. On an album page, each card also
+  offers `Remove from this album`, which never deletes the link itself.
+- **Albums obey the hidden/visible rule.** Counts and covers are computed with the same
+  `locked_domains` condition the link queries use, so a hidden link cannot reach `/` through an
+  album's count, cover, or placeholder domain. Album *names* are labels, not link data, so the
+  same album shows on both pages and each page reports its own side's numbers.
+- Album names are unique ignoring case and surrounding whitespace (`Anime` and `anime` cannot
+  both exist), rename-to-the-same-name is a harmless no-op, and a name that duplicates another
+  album is refused with `409`.
+
 ### The locked area
 
 `/locked` is a **dark** page behind a second secret. Click the icon-only lock button at the
@@ -344,16 +382,23 @@ These are called by the dashboard itself and are authenticated by the `lc_sessio
 | --- | --- | --- |
 | `POST /api/dashboard/links` | `{ url, title?, thumbnail? }` | Adds a link by hand. `title` falls back to `host + path`. |
 | `PATCH /api/dashboard/links/:id` | any of `{ title, url, thumbnail, isFavorite }` | Edits a link. `409` when the URL belongs to another link, `404` when the link is gone. |
-| `DELETE /api/dashboard/links/:id` | — | Permanent. `404` when there was nothing to delete. |
+| `DELETE /api/dashboard/links/:id` | — | Permanent, and also removes the link from every album. `404` when there was nothing to delete. |
+| `POST /api/dashboard/links/:id/albums` | `{ albumId }` | Puts the link in an album. Idempotent: `{ added: false }` when it was already there, `404` when the album or link is gone. |
+| `DELETE /api/dashboard/links/:id/albums/:albumId` | — | Takes the link out of one album, leaving the link and its other albums alone. |
+| `POST /api/dashboard/albums` | `{ name }` | Creates an album. `201` with the album, `400` for a blank/over-long name, `409` for a name another album has. |
+| `PATCH /api/dashboard/albums/:id` | `{ name }` | Renames. `404` when gone, `409` on a name clash; renaming to its own name (in any case) succeeds. |
+| `DELETE /api/dashboard/albums/:id` | — | Deletes the album and its memberships. The links stay. |
 | `POST /api/locked/unlock` | `{ passcode }` | Sets `lc_locked` for one hour. |
 | `POST /api/locked/lock` | — | Clears `lc_locked`. |
 | `POST /api/locked/domains` | `{ domain }` | Hides a domain. Accepts a pasted URL and normalises it. |
 | `DELETE /api/locked/domains/:domain` | — | Reveals a domain again. |
 
-The locked endpoints need the session **and** the passcode cookie; the link endpoints need
-only the session. `/api/links` (the userscript API) is unchanged by all of this: it still
+The locked endpoints need the session **and** the passcode cookie; the link and album
+endpoints need only the session. There is deliberately no `GET /api/dashboard/albums`: pages
+and popups get their data as server-rendered props, and every mutation ends in a
+`router.refresh()`. `/api/links` (the userscript API) is unchanged by all of this: it still
 returns every link, hidden or not, because it is already behind `SECRET_KEY` and is a machine
-interface rather than the screen you look at.
+interface rather than the screen you look at — and it neither reads nor writes albums.
 
 ### CORS
 
@@ -389,13 +434,19 @@ applied, so no cloud credentials and no cleanup are required.
 | `tests/dashboard-auth.test.ts` | Gate decisions and the password check |
 | `tests/locked-auth.test.ts` | The passcode check (blank ⇒ unconfigured) and the locked gate decisions |
 | `tests/auth-routes.test.ts` | Login/logout handlers, cookie attributes, status codes, no cookie on failure |
-| `tests/link-management-routes.test.ts` | Manual add / edit / delete handlers: session gating, derived domain, `404`/`409`, locked links still editable |
+| `tests/link-management-routes.test.ts` | Manual add / edit / delete handlers: session gating, derived domain, `404`/`409`, locked links still editable, and that deleting a link takes it out of its albums |
 | `tests/locked-routes.test.ts` | Unlock / lock / lock-domain handlers: both cookies required, cookie attributes, idempotency |
 | `tests/proxy.test.ts` | Redirect vs. allow vs. `503`, `?next=` handling, matcher exclusions |
 | `tests/redirect.test.ts` | `?next=` sanitising (open-redirect protection), including the blocked prefixes |
 | `tests/logger.test.ts` | Event shape, domain/IP extraction, serialization safety |
-| `tests/link-filters.test.ts` | `?q=` / `?domain=` / `?favorite=` normalisation, URL building, count formatting |
-| `tests/links-repository.test.ts` | Insert vs update, upsert idempotency, concurrent saves, ordering, scope (visible vs. locked), domain filter, favorite filter, search (incl. escaped `%`/`_`), domain list, counts |
+| `tests/link-filters.test.ts` | `?q=` / `?domain=` / `?favorite=` normalisation, tab (`?tab=`) and album-search (`?aq=`) resolution, URL building, count formatting |
+| `tests/links-repository.test.ts` | Insert vs update, upsert idempotency, concurrent saves, ordering, scope (visible vs. locked), domain filter, favorite filter, album filter, search (incl. escaped `%`/`_`), domain list, counts |
+| `tests/album-validation.test.ts` | Album name/membership payloads: trimming, blank rejection, the 100-character cap, and the derived `nameKey` |
+| `tests/albums-repository.test.ts` | Album create/rename/delete, scoped counts + covers + placeholder domain, membership add/remove idempotency, and that deleting a link clears its memberships |
+| `tests/albums-lib.test.ts` | Cover-collage slots (`COLLAGE_SLOTS`), album count formatting, detail-page hrefs for both themes |
+| `tests/album-routes.test.ts` | The four album + membership handlers: session gating, `400`/`404`/`409`, idempotent membership, and that `nameKey` never leaves the server |
+| `tests/dashboard-api.test.ts` | The client fetch helper: payload on success, error message/status on failure, and a request that never left the browser |
+| `tests/sql-support.test.ts` | Shared SQL helpers: LIKE-pattern escaping and unique-violation detection through drizzle's error wrapper |
 | `tests/locked-domains-repository.test.ts` | Locking, unlocking, idempotency, and that a locked domain hides its links |
 | `tests/api-links.test.ts` | Full `POST`/`GET`/`OPTIONS` behaviour, status codes, CORS, analytics events |
 | `tests/time.test.ts` | Relative-time formatting boundaries |
@@ -463,10 +514,12 @@ is met by the serverless function.
   replayed as a passcode, and vice versa.
 - **Hidden means hidden by query, not by the interface.** Locked domains are excluded inside
   the repository SQL, so a locked link cannot leak through the list, the search, the domain
-  dropdown, or the count — there is no code path that forgets to filter.
-- **Link mutations need the dashboard session.** Editing, deleting, and adding links go
-  through session-gated endpoints; changing what is hidden needs the session *and* the
-  passcode. Ids are UUIDs, so they cannot be guessed from outside.
+  dropdown, the count, or — since albums — an album's count, cover collage, or placeholder
+  domain; there is no code path that forgets to filter.
+- **Link and album mutations need the dashboard session.** Editing, deleting, and adding links,
+  filing a link into an album, and creating/renaming/deleting an album all go through
+  session-gated endpoints; changing what is hidden needs the session *and* the passcode. Ids are
+  UUIDs, so they cannot be guessed from outside.
 - **Rotating `SECRET_KEY`** immediately invalidates the userscript; update `CONFIG.SECRET_KEY`
   after rotating. It is separate from the dashboard login, which keeps working.
 - **No scraping.** The dependency tree contains no browser automation or HTML parsing
@@ -483,13 +536,15 @@ src/
   app/
     (app)/                  authenticated pages: navbar layout + dashboard
       layout.tsx            renders the navbar
-      page.tsx              dashboard: visible links only (password protected, force-dynamic)
+      page.tsx              dashboard: Links + Albums tabs (password protected, force-dynamic)
+      albums/[id]/page.tsx  album detail: that album's visible links + full filters
     login/
       page.tsx              login page: single password field, no username
       login-form.tsx        client form (POST /api/auth/login)
     locked/
       layout.tsx            dark shell for the hidden area (adds the `dark` class)
       page.tsx              hidden links + locked-domain panel (passcode required)
+      albums/[id]/page.tsx  dark album detail: that album's hidden links + full filters
       unlock/
         page.tsx            passcode prompt (redirects straight through when unlocked)
         unlock-form.tsx     client form (POST /api/locked/unlock)
@@ -498,6 +553,10 @@ src/
       auth/logout/route.ts            clears the session cookie
       dashboard/links/route.ts        POST: add a link by hand (session auth)
       dashboard/links/[id]/route.ts   PATCH / DELETE: edit, favorite, delete
+      dashboard/links/[id]/albums/route.ts              POST: put the link in an album
+      dashboard/links/[id]/albums/[albumId]/route.ts    DELETE: take it out again
+      dashboard/albums/route.ts       POST: create an album
+      dashboard/albums/[id]/route.ts  PATCH / DELETE: rename, delete
       health/route.ts                 liveness probe (no auth, no data)
       links/route.ts                  POST + GET + OPTIONS (userscript, secret key)
       locked/unlock/route.ts          POST: exchange the passcode for a 1-hour cookie
@@ -508,8 +567,16 @@ src/
     layout.tsx              root layout
   components/
     AddLinkForm.tsx         manual "add link" form
+    AddToAlbumMenu.tsx      per-card album checkbox panel (create + file in one flow)
+    AlbumActions.tsx        inline rename / two-step delete for an album
+    AlbumCard.tsx           cover collage / name / scoped link count
+    AlbumCover.tsx          the 2×2 collage, grey placeholder, folder glyph
+    AlbumCreateForm.tsx     "New album" form on the Albums tab
+    AlbumGrid.tsx           the album grid and its two empty states
+    AlbumSearch.tsx         album-name search, drives `?aq=`
+    DashboardTabs.tsx       the Links / Albums tab strip (`?tab=`)
     EmptyState.tsx          onboarding copy when there are no links
-    LinkActions.tsx         star / inline edit / two-step delete
+    LinkActions.tsx         star / add to album / inline edit / two-step delete
     LinkCard.tsx            thumbnail / title / domain / open button
     LinkFilters.tsx         search + domain + favorites, drives the URL
     LinkGrid.tsx            the card grid and its "no matches" state
@@ -523,16 +590,19 @@ src/
     SetupProblem.tsx        shown when the database is unreachable
   db/
     client.ts               lazy libSQL client + drizzle instance, cached per URL
-    links.ts                upsertLink + listLinks/listDomains/countLinks/updateLink/deleteLink (the only SQL)
+    albums.ts               album CRUD + memberships + scoped counts/covers (album SQL)
+    links.ts                upsertLink + listLinks/listDomains/countLinks/updateLink/deleteLink (the only link SQL)
     locked-domains.ts       listLockedDomains + lockDomain/unlockDomain
-    schema.ts               links + locked_domains tables
+    schema.ts               links + locked_domains + albums + album_links tables
+    sql-support.ts          shared LIKE escaping + unique-violation detection
   lib/
+    albums.ts               collage slots, count formatting, album detail hrefs
     api-auth.ts             session/passcode guards shared by the dashboard endpoints
     api-response.ts         JSON response builders (ok / 4xx / 5xx)
     auth.ts                 x-secret-key verification (userscript API)
     dashboard-api.ts        client-side fetch helper for the dashboard endpoints
     dashboard-auth.ts       dashboard password check + gate decision
-    link-filters.ts         ?q= / ?domain= / ?favorite= normalisation + URL building
+    link-filters.ts         ?q= / ?domain= / ?favorite= / ?tab= / ?aq= normalisation + URL building
     locked-auth.ts          passcode check + locked gate decision
     locked-session.ts       the `lc_locked` token (1 hour)
     logger.ts               structured JSON events

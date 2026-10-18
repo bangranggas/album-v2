@@ -3,10 +3,13 @@
  *
  * Every mutation follows the same shape: call the endpoint, then let the caller
  * `router.refresh()` so the server components re-render from the database. There
- * is no client-side cache to keep in sync, which is why this helper returns only
- * success and an error message rather than the payload.
+ * is no client-side cache to keep in sync; the payload is handed back only for the
+ * one flow that genuinely needs it ("create an album, then add this link to it"),
+ * and every other caller can keep ignoring it.
  */
-export type ApiResult = { ok: true } | { ok: false; status: number; message: string };
+export type ApiResult =
+  | { ok: true; data: unknown }
+  | { ok: false; status: number; message: string };
 
 const FALLBACK_MESSAGE = "Something went wrong. Please try again.";
 
@@ -22,7 +25,14 @@ export async function callApi(
       body: body === undefined ? undefined : JSON.stringify(body),
     });
 
-    if (response.ok) return { ok: true };
+    if (response.ok) {
+      // A 204 (or any body-less success) is fine: the payload is optional.
+      const payload = (await response.json().catch(() => null)) as {
+        data?: unknown;
+      } | null;
+
+      return { ok: true, data: payload?.data };
+    }
 
     const payload = (await response.json().catch(() => null)) as {
       error?: { message?: string };

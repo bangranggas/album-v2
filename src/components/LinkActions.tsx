@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
+import { AddToAlbumMenu } from "@/components/AddToAlbumMenu";
+import type { AlbumOption } from "@/db/albums";
 import type { Link } from "@/db/schema";
 import { callApi } from "@/lib/dashboard-api";
 import { MAX_TITLE_LENGTH, MAX_URL_LENGTH } from "@/lib/validation";
@@ -66,13 +68,30 @@ const FIELD =
   "w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-100 dark:focus:ring-slate-100";
 
 /**
- * The per-card controls: star, edit, delete.
+ * The per-card controls: star, add-to-album, edit, delete.
  *
  * Edit is an inline form rather than a dialog, and delete is a two-step confirm
  * inside the card — the project deliberately avoids browser popups (the login
  * flow has no Basic Auth challenge for the same reason).
  */
-export function LinkActions({ link, locked = false }: { link: Link; locked?: boolean }) {
+export interface LinkActionsProps {
+  link: Link;
+  locked?: boolean;
+  /** Every album, for the "add to album" popup. Omitted where it is not offered. */
+  albums?: readonly AlbumOption[];
+  /** The albums this link is already in, as the server last reported them. */
+  memberAlbumIds?: readonly string[];
+  /** Set on an album's page, where "remove from this album" makes sense. */
+  removeFromAlbumId?: string;
+}
+
+export function LinkActions({
+  link,
+  locked = false,
+  albums,
+  memberAlbumIds,
+  removeFromAlbumId,
+}: LinkActionsProps) {
   const router = useRouter();
   const [mode, setMode] = useState<"idle" | "editing" | "confirming">("idle");
   const [busy, setBusy] = useState(false);
@@ -158,6 +177,28 @@ export function LinkActions({ link, locked = false }: { link: Link; locked?: boo
     }
 
     setMode("idle");
+    router.refresh();
+  }
+
+  async function removeFromAlbum(): Promise<void> {
+    if (busy || removeFromAlbumId === undefined) return;
+
+    setBusy(true);
+    setError(null);
+
+    const result = await callApi(
+      `/api/dashboard/links/${link.id}/albums/${removeFromAlbumId}`,
+      "DELETE",
+    );
+
+    setBusy(false);
+
+    // Already out of the album is the outcome the visitor asked for.
+    if (!result.ok && result.status !== 404) {
+      handleFailure(result.status, result.message);
+      return;
+    }
+
     router.refresh();
   }
 
@@ -284,6 +325,14 @@ export function LinkActions({ link, locked = false }: { link: Link; locked?: boo
         >
           <StarIcon filled={link.isFavorite} />
         </button>
+        {albums === undefined ? null : (
+          <AddToAlbumMenu
+            linkId={link.id}
+            albums={albums}
+            memberAlbumIds={memberAlbumIds ?? []}
+            locked={locked}
+          />
+        )}
         <button
           type="button"
           onClick={() => {
@@ -309,6 +358,17 @@ export function LinkActions({ link, locked = false }: { link: Link; locked?: boo
           <TrashIcon />
         </button>
       </div>
+
+      {removeFromAlbumId === undefined ? null : (
+        <button
+          type="button"
+          onClick={removeFromAlbum}
+          disabled={busy}
+          className="self-start rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 disabled:opacity-60 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+        >
+          {busy ? "Removing…" : "Remove from this album"}
+        </button>
+      )}
 
       {error === null ? null : (
         <p role="alert" className="text-xs text-red-600 dark:text-red-400">
