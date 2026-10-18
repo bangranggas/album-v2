@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { albumHref, COLLAGE_SLOTS, collageSlots, formatAlbumCount } from "@/lib/albums";
+import {
+  albumHref,
+  albumScopeForPage,
+  COLLAGE_SLOTS,
+  collageSlots,
+  formatAlbumCount,
+  isAlbumScope,
+} from "@/lib/albums";
 
 describe("formatAlbumCount", () => {
   it("states the total when nothing is filtered", () => {
@@ -51,5 +58,34 @@ describe("albumHref", () => {
 
   it("encodes an id that is not URL-safe", () => {
     expect(albumHref("a b")).toBe("/albums/a%20b");
+  });
+});
+
+describe("albumScopeForPage", () => {
+  it("puts an album started on the dashboard on the visible side", () => {
+    expect(albumScopeForPage(false)).toBe("visible");
+  });
+
+  it("puts an album started on the locked page on the locked side", () => {
+    expect(albumScopeForPage(true)).toBe("locked");
+  });
+});
+
+describe("isAlbumScope", () => {
+  it("accepts the two sides", () => {
+    expect(isAlbumScope("visible")).toBe(true);
+    expect(isAlbumScope("locked")).toBe(true);
+  });
+
+  it.each([
+    ["the link scope's escape hatch", "all"],
+    ["an empty string", ""],
+    ["a different case", "Visible"],
+    ["a number", 42],
+    ["null", null],
+    ["undefined", undefined],
+    ["an object", {}],
+  ])("rejects %s", (_label, value) => {
+    expect(isAlbumScope(value)).toBe(false);
   });
 });

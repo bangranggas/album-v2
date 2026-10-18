@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { isAlbumScope, type AlbumScope } from "./albums";
+
 export const MAX_URL_LENGTH = 2048;
 export const MAX_TITLE_LENGTH = 512;
 export const DEFAULT_LIMIT = 100;
@@ -361,6 +363,15 @@ export interface AlbumLinkInput {
   albumId: string;
 }
 
+/**
+ * A new album: the label plus the side it belongs to. The side is required rather
+ * than defaulted, because a silent default would file an album on the wrong page
+ * and there is no move action to repair it.
+ */
+export interface AlbumCreateInput extends AlbumNameInput {
+  scope: AlbumScope;
+}
+
 const albumNameSchema = z.object({
   name: z
     .string()
@@ -390,6 +401,34 @@ export function parseAlbumName(raw: unknown): ParseResult<AlbumNameInput> {
   const name = result.data.name;
 
   return { ok: true, data: { name, nameKey: name.toLowerCase() } };
+}
+
+const albumCreateSchema = albumNameSchema.extend({ scope: z.string() });
+
+/**
+ * A new album's payload. The name is parsed exactly like a rename target, and the
+ * side has to be one of the two the schema knows; anything else is a `400` rather
+ * than a guess, so a hand-made request can never file an album somewhere it does
+ * not belong.
+ */
+export function parseAlbumCreateInput(
+  raw: unknown,
+): ParseResult<AlbumCreateInput> {
+  if (!isPlainObject(raw)) {
+    return { ok: false, message: "payload: must be a JSON object" };
+  }
+
+  const result = albumCreateSchema.safeParse(raw);
+  if (!result.success) {
+    return { ok: false, message: describeIssue(result.error) };
+  }
+
+  const { name, scope } = result.data;
+  if (!isAlbumScope(scope)) {
+    return { ok: false, message: 'scope: must be "visible" or "locked"' };
+  }
+
+  return { ok: true, data: { name, nameKey: name.toLowerCase(), scope } };
 }
 
 const albumLinkSchema = z.object({

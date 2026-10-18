@@ -60,7 +60,11 @@ async function loadAlbum(id: string, filters: FilterValues): Promise<AlbumResult
     const db = getDb();
     const album = await getAlbumById(db, id);
 
-    if (album === undefined) return { kind: "missing" };
+    // An album of the *other* side answers exactly like an unknown id: this page
+    // must not confirm that a light album exists, and the URL is guessable.
+    if (album === undefined || album.scope !== "locked") {
+      return { kind: "missing" };
+    }
 
     // Scoped to *hidden* links, so the dark page shows this side of the album and
     // the light one can never be reached from here.
@@ -75,12 +79,13 @@ async function loadAlbum(id: string, filters: FilterValues): Promise<AlbumResult
       }),
       listDomains(db, { scope: "locked", albumId: id }),
       countLinks(db, { scope: "locked", albumId: id }),
-      listAlbumOptions(db),
+      listAlbumOptions(db, "locked"),
     ]);
 
     const memberships = await listAlbumIdsByLink(
       db,
       links.map((link) => link.id),
+      "locked",
     );
 
     return {

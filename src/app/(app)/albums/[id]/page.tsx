@@ -46,8 +46,11 @@ async function loadAlbum(
     const album = await getAlbumById(db, id);
 
     // An unknown id — a typo, or an album deleted while the page was open — is a
-    // 404, never a database error and never a blank page.
-    if (album === undefined) return { kind: "missing" };
+    // 404, never a database error and never a blank page. An album of the *other*
+    // side answers the same way: the light page must not even confirm it exists.
+    if (album === undefined || album.scope !== "visible") {
+      return { kind: "missing" };
+    }
 
     // Scoped to *visible* links: opening an album can never surface a hidden link.
     const [links, domains, total, albums] = await Promise.all([
@@ -61,12 +64,13 @@ async function loadAlbum(
       }),
       listDomains(db, { scope: "visible", albumId: id }),
       countLinks(db, { scope: "visible", albumId: id }),
-      listAlbumOptions(db),
+      listAlbumOptions(db, "visible"),
     ]);
 
     const memberships = await listAlbumIdsByLink(
       db,
       links.map((link) => link.id),
+      "visible",
     );
 
     return {

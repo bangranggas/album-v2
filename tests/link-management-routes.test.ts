@@ -424,6 +424,7 @@ describe("dashboard link routes", () => {
       const album = await createAlbum(testDatabase!.db, {
         name: "Anime",
         nameKey: "anime",
+        scope: "visible",
       });
       if (!album.ok) throw new Error("setup failed");
       await addLinkToAlbum(testDatabase!.db, album.album.id, saved.link.id);

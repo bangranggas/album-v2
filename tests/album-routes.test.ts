@@ -29,6 +29,7 @@ const { DELETE: removeMemberRoute } = await import(
 );
 const { addLinkToAlbum, createAlbum, listAlbums } = await import("@/db/albums");
 const { upsertLink } = await import("@/db/links");
+const { lockDomain } = await import("@/db/locked-domains");
 const { albumLinks } = await import("@/db/schema");
 const { SESSION_COOKIE_NAME, signSession } = await import("@/lib/session");
 
@@ -69,7 +70,32 @@ async function seed(): Promise<{ linkId: string; albumId: string }> {
     thumbnail: null,
     domain: "example.com",
   });
-  const album = await createAlbum(db, { name: "Anime", nameKey: "anime" });
+  const album = await createAlbum(db, {
+    name: "Anime",
+    nameKey: "anime",
+    scope: "visible",
+  });
+  if (!album.ok) throw new Error("setup failed");
+
+  return { linkId: saved.link.id, albumId: album.album.id };
+}
+
+/** A link that only the locked page may see, plus a locked album to hold it. */
+async function seedHidden(): Promise<{ linkId: string; albumId: string }> {
+  const db = dbState.db;
+  const saved = await upsertLink(db, {
+    url: "https://hidden.example/article",
+    title: "Hidden Article",
+    thumbnail: null,
+    domain: "hidden.example",
+  });
+  const locked = await lockDomain(db, "hidden.example");
+  if (!locked) throw new Error("setup failed");
+  const album = await createAlbum(db, {
+    name: "Anime",
+    nameKey: "anime",
+    scope: "locked",
+  });
   if (!album.ok) throw new Error("setup failed");
 
   return { linkId: saved.link.id, albumId: album.album.id };
@@ -97,27 +123,30 @@ describe("dashboard album routes", () => {
   });
 
   describe("POST /api/dashboard/albums", () => {
-    it("creates an album for a signed-in visitor", async () => {
+    it("creates an album for a signed-in visitor, on the side it asked for", async () => {
       const response = await createAlbumRoute(
         jsonRequest("https://app.test/api/dashboard/albums", "POST", {
           cookies: [validSessionCookie()],
-          body: { name: "  Anime  " },
+          body: { name: "  Anime  ", scope: "locked" },
         }),
       );
 
       expect(response.status).toBe(201);
       await expect(response.json()).resolves.toMatchObject({
         ok: true,
-        data: { album: { name: "Anime" } },
+        data: { album: { name: "Anime", scope: "locked" } },
       });
-      expect(await listAlbums(testDatabase!.db)).toHaveLength(1);
+      expect(
+        await listAlbums(testDatabase!.db, { scope: "locked" }),
+      ).toHaveLength(1);
+      expect(await listAlbums(testDatabase!.db)).toEqual([]);
     });
 
     it("never exposes the uniqueness key", async () => {
       const response = await createAlbumRoute(
         jsonRequest("https://app.test/api/dashboard/albums", "POST", {
           cookies: [validSessionCookie()],
-          body: { name: "Anime" },
+          body: { name: "Anime", scope: "visible" },
         }),
       );
 
@@ -125,19 +154,62 @@ describe("dashboard album routes", () => {
         data: { album: Record<string, unknown> };
       };
       expect(body.data.album).not.toHaveProperty("nameKey");
+      expect(body.data.album).toMatchObject({ scope: "visible" });
+    });
+
+    it("lets the same name exist once per side", async () => {
+      const light = await createAlbumRoute(
+        jsonRequest("https://app.test/api/dashboard/albums", "POST", {
+          cookies: [validSessionCookie()],
+          body: { name: "Anime", scope: "visible" },
+        }),
+      );
+      const dark = await createAlbumRoute(
+        jsonRequest("https://app.test/api/dashboard/albums", "POST", {
+          cookies: [validSessionCookie()],
+          body: { name: "anime", scope: "locked" },
+        }),
+      );
+
+      expect(light.status).toBe(201);
+      expect(dark.status).toBe(201);
+      expect(await listAlbums(testDatabase!.db)).toHaveLength(1);
+      expect(
+        await listAlbums(testDatabase!.db, { scope: "locked" }),
+      ).toHaveLength(1);
+    });
+
+    it.each([
+      ["a missing scope", { name: "Anime" }],
+      ["an empty scope", { name: "Anime", scope: "" }],
+      ["the link scope's escape hatch", { name: "Anime", scope: "all" }],
+      ["a differently cased side", { name: "Anime", scope: "Visible" }],
+    ])("rejects %s with a 400 and writes nothing", async (_label, body) => {
+      const response = await createAlbumRoute(
+        jsonRequest("https://app.test/api/dashboard/albums", "POST", {
+          cookies: [validSessionCookie()],
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "VALIDATION_ERROR" },
+      });
+      expect(await listAlbums(testDatabase!.db)).toEqual([]);
     });
 
     it("refuses a name another album already has, whatever its case", async () => {
       await createAlbumRoute(
         jsonRequest("https://app.test/api/dashboard/albums", "POST", {
           cookies: [validSessionCookie()],
-          body: { name: "Anime" },
+          body: { name: "Anime", scope: "visible" },
         }),
       );
       const response = await createAlbumRoute(
         jsonRequest("https://app.test/api/dashboard/albums", "POST", {
           cookies: [validSessionCookie()],
-          body: { name: "anime" },
+          body: { name: "anime", scope: "visible" },
         }),
       );
 
@@ -182,7 +254,7 @@ describe("dashboard album routes", () => {
     it("refuses a visitor with no session", async () => {
       const response = await createAlbumRoute(
         jsonRequest("https://app.test/api/dashboard/albums", "POST", {
-          body: { name: "Anime" },
+          body: { name: "Anime", scope: "visible" },
         }),
       );
 
@@ -194,7 +266,7 @@ describe("dashboard album routes", () => {
       const response = await createAlbumRoute(
         jsonRequest("https://app.test/api/dashboard/albums", "POST", {
           cookies: [validSessionCookie("some-other-password")],
-          body: { name: "Anime" },
+          body: { name: "Anime", scope: "visible" },
         }),
       );
 
@@ -206,7 +278,7 @@ describe("dashboard album routes", () => {
       const response = await createAlbumRoute(
         jsonRequest("https://app.test/api/dashboard/albums", "POST", {
           cookies: [validSessionCookie()],
-          body: { name: "Anime" },
+          body: { name: "Anime", scope: "visible" },
         }),
       );
 
@@ -225,7 +297,7 @@ describe("dashboard album routes", () => {
       const response = await renameAlbumRoute(
         jsonRequest(`https://app.test/api/dashboard/albums/${albumId}`, "PATCH", {
           cookies: [validSessionCookie()],
-          body: { name: "Animation" },
+          body: { name: "Animation", scope: "visible" },
         }),
         context,
       );
@@ -242,7 +314,7 @@ describe("dashboard album routes", () => {
       const response = await renameAlbumRoute(
         jsonRequest("https://app.test/api/dashboard/albums/x", "PATCH", {
           cookies: [validSessionCookie()],
-          body: { name: "ANIME" },
+          body: { name: "ANIME", scope: "visible" },
         }),
         { params: Promise.resolve({ id: albumId }) },
       );
@@ -255,12 +327,13 @@ describe("dashboard album routes", () => {
       const other = await createAlbum(dbState.db, {
         name: "Movies",
         nameKey: "movies",
+        scope: "visible",
       });
 
       const response = await renameAlbumRoute(
         jsonRequest("https://app.test/api/dashboard/albums/x", "PATCH", {
           cookies: [validSessionCookie()],
-          body: { name: "movies" },
+          body: { name: "movies", scope: "visible" },
         }),
         { params: Promise.resolve({ id: albumId }) },
       );
@@ -269,11 +342,35 @@ describe("dashboard album routes", () => {
       expect(response.status).toBe(409);
     });
 
+    it("accepts a name that only the other side owns", async () => {
+      const { albumId } = await seed();
+      const dark = await createAlbum(dbState.db, {
+        name: "Films",
+        nameKey: "films",
+        scope: "locked",
+      });
+
+      const response = await renameAlbumRoute(
+        jsonRequest("https://app.test/api/dashboard/albums/x", "PATCH", {
+          cookies: [validSessionCookie()],
+          body: { name: "films" },
+        }),
+        { params: Promise.resolve({ id: albumId }) },
+      );
+
+      expect(dark.ok).toBe(true);
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        data: { album: { name: "films", scope: "visible" } },
+      });
+      expect(await listAlbums(dbState.db, { scope: "locked" })).toHaveLength(1);
+    });
+
     it("answers 404 for an album that is gone", async () => {
       const response = await renameAlbumRoute(
         jsonRequest("https://app.test/api/dashboard/albums/gone", "PATCH", {
           cookies: [validSessionCookie()],
-          body: { name: "Anime" },
+          body: { name: "Anime", scope: "visible" },
         }),
         { params: Promise.resolve({ id: "gone" }) },
       );
@@ -287,7 +384,7 @@ describe("dashboard album routes", () => {
       const response = await renameAlbumRoute(
         jsonRequest("https://app.test/api/dashboard/albums/x", "PATCH", {
           cookies: [validSessionCookie()],
-          body: { name: "  " },
+          body: { name: "  ", scope: "visible" },
         }),
         { params: Promise.resolve({ id: albumId }) },
       );
@@ -300,7 +397,7 @@ describe("dashboard album routes", () => {
 
       const response = await renameAlbumRoute(
         jsonRequest("https://app.test/api/dashboard/albums/x", "PATCH", {
-          body: { name: "Animation" },
+          body: { name: "Animation", scope: "visible" },
         }),
         { params: Promise.resolve({ id: albumId }) },
       );
@@ -326,7 +423,7 @@ describe("dashboard album routes", () => {
         data: { deleted: true },
       });
       expect(await listAlbums(dbState.db)).toEqual([]);
-      expect(await listAlbums(dbState.db, { scope: "all" })).toEqual([]);
+      expect(await listAlbums(dbState.db, { scope: "locked" })).toEqual([]);
     });
 
     it("answers 404 for an album that is already gone", async () => {
@@ -428,6 +525,61 @@ describe("dashboard album routes", () => {
       );
 
       expect(response.status).toBe(400);
+    });
+
+    it("refuses a hidden link for a visible album, writing nothing", async () => {
+      const { albumId } = await seed();
+      const hidden = await seedHidden();
+
+      const response = await addMemberRoute(
+        jsonRequest("https://app.test/api/dashboard/links/x/albums", "POST", {
+          cookies: [validSessionCookie()],
+          body: { albumId },
+        }),
+        { params: Promise.resolve({ id: hidden.linkId }) },
+      );
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "CONFLICT" },
+      });
+      await expect(dbState.db.select().from(albumLinks)).resolves.toHaveLength(0);
+    });
+
+    it("refuses a visible link for a locked album, writing nothing", async () => {
+      const { linkId } = await seed();
+      const hidden = await seedHidden();
+
+      const response = await addMemberRoute(
+        jsonRequest("https://app.test/api/dashboard/links/x/albums", "POST", {
+          cookies: [validSessionCookie()],
+          body: { albumId: hidden.albumId },
+        }),
+        { params: Promise.resolve({ id: linkId }) },
+      );
+
+      expect(response.status).toBe(409);
+      await expect(dbState.db.select().from(albumLinks)).resolves.toHaveLength(0);
+    });
+
+    it("adds a hidden link to a locked album", async () => {
+      const hidden = await seedHidden();
+
+      const response = await addMemberRoute(
+        jsonRequest("https://app.test/api/dashboard/links/x/albums", "POST", {
+          cookies: [validSessionCookie()],
+          body: { albumId: hidden.albumId },
+        }),
+        { params: Promise.resolve({ id: hidden.linkId }) },
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        data: { added: true },
+      });
+      expect(
+        await listAlbums(dbState.db, { scope: "locked" }),
+      ).toHaveLength(1);
     });
 
     it("refuses a visitor with no session", async () => {
@@ -713,7 +865,7 @@ describe("dashboard album routes", () => {
       await createAlbumRoute(
         jsonRequest("https://app.test/api/dashboard/albums", "POST", {
           cookies: [validSessionCookie()],
-          body: { name: "Anime" },
+          body: { name: "Anime", scope: "visible" },
         }),
       );
 
@@ -725,7 +877,7 @@ describe("dashboard album routes", () => {
       await createAlbumRoute(
         jsonRequest("https://app.test/api/dashboard/albums", "POST", {
           cookies: [validSessionCookie()],
-          body: { name: "   " },
+          body: { name: "   ", scope: "visible" },
         }),
       );
 

@@ -908,7 +908,11 @@ describe("album filter", () => {
 
   /** Two albums over four links, two of which live on a hidden domain. */
   async function seedAlbum(db: TestDatabase["db"]): Promise<string> {
-    const created = await createAlbum(db, { name: "Anime", nameKey: "anime" });
+    const created = await createAlbum(db, {
+      name: "Anime",
+      nameKey: "anime",
+      scope: "visible",
+    });
     if (!created.ok) throw new Error("setup failed");
 
     const entries: LinkInput[] = [

@@ -58,7 +58,7 @@ async function loadLinks(filters: FilterValues): Promise<DashboardData> {
 
   // One round trip each, in parallel: the filtered page, the full domain list
   // (so the dropdown can always switch domains), the unfiltered total, and the
-  // album names the popup offers.
+  // albums this page is allowed to offer.
   const [links, domains, total, albums] = await Promise.all([
     listLinks(db, {
       limit: PAGE_LIMIT,
@@ -69,7 +69,7 @@ async function loadLinks(filters: FilterValues): Promise<DashboardData> {
     }),
     listDomains(db, { scope: "visible" }),
     countLinks(db, { scope: "visible" }),
-    listAlbumOptions(db),
+    listAlbumOptions(db, "visible"),
   ]);
 
   // Then one more query for the whole page's memberships: asking per card would be
@@ -77,22 +77,23 @@ async function loadLinks(filters: FilterValues): Promise<DashboardData> {
   const memberships = await listAlbumIdsByLink(
     db,
     links.map((link) => link.id),
+    "visible",
   );
 
   return { links, domains, total, albums, memberships };
 }
 
 /**
- * The Albums tab, scoped the same way: the count and the covers of an album only
- * ever consider visible links, while the album's own name is a label the owner
- * chose and is shown on both pages (see the requirements' D3).
+ * The Albums tab, scoped the same way: only the light page's own albums, and their
+ * counts and covers only ever consider visible links. A locked album is not this
+ * page's to list (see the per-side albums feature).
  */
 async function loadAlbums(query: string): Promise<AlbumsData> {
   const db = getDb();
 
   const [albums, total] = await Promise.all([
     listAlbums(db, { scope: "visible", query, limit: PAGE_LIMIT }),
-    countAlbums(db),
+    countAlbums(db, "visible"),
   ]);
 
   return { albums, total };

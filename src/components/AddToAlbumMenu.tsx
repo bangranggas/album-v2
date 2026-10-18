@@ -5,6 +5,7 @@ import { useCallback, useRef, useState } from "react";
 
 import { AlbumPickerPanel } from "@/components/AlbumPickerPanel";
 import type { AlbumOption } from "@/db/albums";
+import { albumScopeForPage } from "@/lib/albums";
 import { callApi, readCreatedAlbumId } from "@/lib/dashboard-api";
 
 function FolderPlusIcon() {
@@ -123,7 +124,12 @@ export function AddToAlbumMenu({
     // Two calls, in order: the album has to exist before the link can join it. The
     // create endpoint is the same tested one the Albums tab uses, and it answers
     // with the new album, so the id never has to be guessed from the name.
-    const created = await callApi("/api/dashboard/albums", "POST", { name });
+    const created = await callApi("/api/dashboard/albums", "POST", {
+      name,
+      // Filed on the side this popup was opened from; the album list it offers is
+      // already that side's, so the new album lands where its siblings are.
+      scope: albumScopeForPage(locked),
+    });
     const albumId = created.ok ? readCreatedAlbumId(created.data) : null;
 
     if (albumId === null) {

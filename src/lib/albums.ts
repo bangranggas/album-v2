@@ -8,6 +8,32 @@ import { formatCount } from "./link-filters";
  */
 export const COLLAGE_SLOTS = 4;
 
+/**
+ * The two sides an album can live on: the light dashboard (`visible`) or the
+ * passcode-gated area (`locked`). It is the link rule's vocabulary minus its `all`
+ * escape hatch — an album always belongs to exactly one visitor-facing side, and
+ * nothing an album shows uses `all`.
+ */
+export type AlbumScope = "visible" | "locked";
+
+/** The sides, for the payload parser and for tests that walk both. */
+export const ALBUM_SCOPES: readonly AlbumScope[] = ["visible", "locked"];
+
+export function isAlbumScope(value: unknown): value is AlbumScope {
+  return value === "visible" || value === "locked";
+}
+
+/**
+ * The side an album started on, derived from the page it was created from.
+ *
+ * Every page already knows whether it is the locked one (it passes `locked` down to
+ * its cards and forms), so the side never has to be threaded as a second flag that
+ * could disagree with the theme and the gate around it.
+ */
+export function albumScopeForPage(locked: boolean): AlbumScope {
+  return locked ? "locked" : "visible";
+}
+
 /** The count line above the album grid: `"5 albums"` / `"2 of 5 albums"`. */
 export function formatAlbumCount(
   shown: number,

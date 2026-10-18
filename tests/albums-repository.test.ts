@@ -16,9 +16,22 @@ import {
 import { deleteLink, listLinks } from "@/db/links";
 import { lockDomain } from "@/db/locked-domains";
 import { albumLinks, links } from "@/db/schema";
+import type { AlbumCreateInput } from "@/lib/validation";
 import { createTestDatabase, type TestDatabase } from "./helpers/test-db";
 
-const ANIME = { name: "Anime", nameKey: "anime" };
+const ANIME: AlbumCreateInput = {
+  name: "Anime",
+  nameKey: "anime",
+  scope: "visible",
+};
+
+/** A new album on the requested side; the light page is the usual one. */
+function makeAlbum(
+  name: string,
+  scope: AlbumCreateInput["scope"] = "visible",
+): AlbumCreateInput {
+  return { name, nameKey: name.toLowerCase(), scope };
+}
 
 let testDatabase: TestDatabase | undefined;
 
@@ -75,7 +88,7 @@ describe("createAlbum", () => {
     const { db } = await freshDatabase();
 
     await createAlbum(db, ANIME);
-    const second = await createAlbum(db, { name: "ANIME", nameKey: "anime" });
+    const second = await createAlbum(db, makeAlbum("ANIME"));
 
     expect(second).toEqual({ ok: false, reason: "name-taken" });
     await expect(listAlbums(db)).resolves.toHaveLength(1);
@@ -85,10 +98,45 @@ describe("createAlbum", () => {
     const { db } = await freshDatabase();
 
     await createAlbum(db, ANIME);
-    const second = await createAlbum(db, { name: "Movies", nameKey: "movies" });
+    const second = await createAlbum(db, makeAlbum("Movies"));
 
     expect(second.ok).toBe(true);
     await expect(listAlbums(db)).resolves.toHaveLength(2);
+  });
+
+  it("stores the side the album belongs to", async () => {
+    const { db } = await freshDatabase();
+
+    const visible = await createAlbum(db, ANIME);
+    const locked = await createAlbum(db, makeAlbum("Anime", "locked"));
+
+    expect(visible.ok && visible.album.scope).toBe("visible");
+    expect(locked.ok && locked.album.scope).toBe("locked");
+  });
+
+  it("lets the same name exist once per side", async () => {
+    const { db } = await freshDatabase();
+
+    await createAlbum(db, ANIME);
+    const twin = await createAlbum(db, makeAlbum("anime", "locked"));
+
+    // The unique index is on (scope, name_key), so the label is free on the other
+    // side — which is also what stops a conflict from revealing a locked name.
+    expect(twin.ok).toBe(true);
+    await expect(listAlbums(db)).resolves.toHaveLength(1);
+    await expect(listAlbums(db, { scope: "locked" })).resolves.toHaveLength(1);
+  });
+
+  it("still refuses the same name twice on one side", async () => {
+    const { db } = await freshDatabase();
+
+    await createAlbum(db, ANIME);
+    const second = await createAlbum(db, makeAlbum("ANIME", "locked"));
+
+    expect(second.ok).toBe(true);
+    const third = await createAlbum(db, makeAlbum("anime", "locked"));
+
+    expect(third).toEqual({ ok: false, reason: "name-taken" });
   });
 });
 
@@ -122,7 +170,7 @@ describe("renameAlbum", () => {
     const { db } = await freshDatabase();
     const first = await createAlbum(db, ANIME);
     if (!first.ok) throw new Error("setup failed");
-    await createAlbum(db, { name: "Movies", nameKey: "movies" });
+    await createAlbum(db, makeAlbum("Movies"));
 
     const result = await renameAlbum(db, first.album.id, {
       name: "movies",
@@ -146,6 +194,34 @@ describe("renameAlbum", () => {
 
     expect(result.ok && result.album.name).toBe("ANIME");
   });
+
+  it("only checks the conflict inside the album's own side", async () => {
+    const { db } = await freshDatabase();
+    const light = await createAlbum(db, ANIME);
+    const dark = await createAlbum(db, makeAlbum("Films", "locked"));
+    const movies = await createAlbum(db, makeAlbum("Movies"));
+    if (!light.ok || !dark.ok || !movies.ok) throw new Error("setup failed");
+
+    // A name the same side already owns is still refused.
+    await expect(
+      renameAlbum(db, movies.album.id, { name: "anime", nameKey: "anime" }),
+    ).resolves.toEqual({ ok: false, reason: "name-taken" });
+
+    // A name that only the *other* side owns is free, and the side never changes.
+    const takenFromLight = await renameAlbum(db, dark.album.id, {
+      name: "Anime",
+      nameKey: "anime",
+    });
+    expect(takenFromLight.ok && takenFromLight.album.name).toBe("Anime");
+    expect(takenFromLight.ok && takenFromLight.album.scope).toBe("locked");
+
+    const takenFromDark = await renameAlbum(db, light.album.id, {
+      name: "Films",
+      nameKey: "films",
+    });
+    expect(takenFromDark.ok && takenFromDark.album.name).toBe("Films");
+    expect(takenFromDark.ok && takenFromDark.album.scope).toBe("visible");
+  });
 });
 
 describe("deleteAlbum", () => {
@@ -160,7 +236,7 @@ describe("deleteAlbum", () => {
 
     await expect(listAlbums(db)).resolves.toEqual([]);
     await expect(listLinks(db)).resolves.toHaveLength(1);
-    await expect(listAlbumIdsByLink(db, ["link-1"])).resolves.toEqual(new Map());
+    await expect(listAlbumIdsByLink(db, ["link-1"], "visible")).resolves.toEqual(new Map());
   });
 
   it("reports false for an album that is already gone", async () => {
@@ -176,7 +252,7 @@ describe("deleteAlbum", () => {
   it("does not touch another album's memberships", async () => {
     const { db } = await freshDatabase();
     const first = await createAlbum(db, ANIME);
-    const second = await createAlbum(db, { name: "Movies", nameKey: "movies" });
+    const second = await createAlbum(db, makeAlbum("Movies"));
     if (!first.ok || !second.ok) throw new Error("setup failed");
     await insertLink(db, { id: "link-1" });
     await addLinkToAlbum(db, first.album.id, "link-1");
@@ -184,7 +260,7 @@ describe("deleteAlbum", () => {
 
     await deleteAlbum(db, first.album.id);
 
-    const memberships = await listAlbumIdsByLink(db, ["link-1"]);
+    const memberships = await listAlbumIdsByLink(db, ["link-1"], "visible");
     expect(memberships.get("link-1")).toEqual([second.album.id]);
   });
 });
@@ -213,7 +289,7 @@ describe("addLinkToAlbum", () => {
     await expect(addLinkToAlbum(db, created.album.id, "link-1")).resolves.toBe(
       "already",
     );
-    const memberships = await listAlbumIdsByLink(db, ["link-1"]);
+    const memberships = await listAlbumIdsByLink(db, ["link-1"], "visible");
     expect(memberships.get("link-1")).toEqual([created.album.id]);
   });
 
@@ -239,17 +315,59 @@ describe("addLinkToAlbum", () => {
   it("lets one link live in several albums", async () => {
     const { db } = await freshDatabase();
     const first = await createAlbum(db, ANIME);
-    const second = await createAlbum(db, { name: "Movies", nameKey: "movies" });
+    const second = await createAlbum(db, makeAlbum("Movies"));
     if (!first.ok || !second.ok) throw new Error("setup failed");
     await insertLink(db, { id: "link-1" });
 
     await addLinkToAlbum(db, first.album.id, "link-1");
     await addLinkToAlbum(db, second.album.id, "link-1");
 
-    const memberships = await listAlbumIdsByLink(db, ["link-1"]);
+    const memberships = await listAlbumIdsByLink(db, ["link-1"], "visible");
     expect(memberships.get("link-1")?.sort()).toEqual(
       [first.album.id, second.album.id].sort(),
     );
+  });
+
+  it("refuses a visible link for a locked album", async () => {
+    const { db } = await freshDatabase();
+    const created = await createAlbum(db, makeAlbum("Anime", "locked"));
+    if (!created.ok) throw new Error("setup failed");
+    await insertLink(db, { id: "link-1" });
+
+    await expect(addLinkToAlbum(db, created.album.id, "link-1")).resolves.toBe(
+      "scope-mismatch",
+    );
+    await expect(db.select().from(albumLinks)).resolves.toHaveLength(0);
+  });
+
+  it("refuses a hidden link for a visible album", async () => {
+    const { db } = await freshDatabase();
+    const created = await createAlbum(db, ANIME);
+    if (!created.ok) throw new Error("setup failed");
+    await insertLink(db, { id: "hidden", domain: "hidden.example" });
+    await lockDomain(db, "hidden.example");
+
+    await expect(addLinkToAlbum(db, created.album.id, "hidden")).resolves.toBe(
+      "scope-mismatch",
+    );
+    await expect(db.select().from(albumLinks)).resolves.toHaveLength(0);
+  });
+
+  it("accepts a link that is filed before its domain is locked", async () => {
+    const { db } = await freshDatabase();
+    const created = await createAlbum(db, ANIME);
+    if (!created.ok) throw new Error("setup failed");
+    await insertLink(db, { id: "later-hidden", domain: "hidden.example" });
+
+    await expect(
+      addLinkToAlbum(db, created.album.id, "later-hidden"),
+    ).resolves.toBe("added");
+
+    // Locking the domain afterwards does not rewrite the membership; it only stops
+    // the link from showing on this side (the dormant case).
+    await lockDomain(db, "hidden.example");
+    const rows = await db.select().from(albumLinks);
+    expect(rows).toHaveLength(1);
   });
 });
 
@@ -379,10 +497,31 @@ describe("addLinksToAlbum", () => {
     expect(result.added + result.alreadyIn + result.skipped).toBe(3);
   });
 
+  it("counts an id that is on the other side as skipped", async () => {
+    const { db } = await freshDatabase();
+    const created = await createAlbum(db, ANIME);
+    if (!created.ok) throw new Error("setup failed");
+    await insertLink(db, { id: "visible" });
+    await insertLink(db, { id: "hidden", domain: "hidden.example" });
+    await lockDomain(db, "hidden.example");
+
+    const result = await addLinksToAlbum(db, created.album.id, [
+      "visible",
+      "hidden",
+    ]);
+
+    // The bulk panel only ever offers albums of its own page, so this is
+    // unreachable from the UI; the counts still describe every distinct id it got,
+    // and `skipped` stays deliberately vague about why.
+    expect(result).toEqual({ added: 1, alreadyIn: 0, skipped: 1 });
+    const rows = await db.select().from(albumLinks);
+    expect(rows.map((row) => row.linkId)).toEqual(["visible"]);
+  });
+
   it("leaves other albums and unselected links alone", async () => {
     const { db } = await freshDatabase();
     const first = await createAlbum(db, ANIME);
-    const second = await createAlbum(db, { name: "Movies", nameKey: "movies" });
+    const second = await createAlbum(db, makeAlbum("Movies"));
     if (!first.ok || !second.ok) throw new Error("setup failed");
     await insertLink(db, { id: "link-1" });
     await insertLink(db, { id: "link-2" });
@@ -390,7 +529,7 @@ describe("addLinksToAlbum", () => {
 
     await addLinksToAlbum(db, first.album.id, ["link-1", "link-2"]);
 
-    const memberships = await listAlbumIdsByLink(db, ["link-1", "link-2"]);
+    const memberships = await listAlbumIdsByLink(db, ["link-1", "link-2"], "visible");
     expect(memberships.get("link-1")).toEqual([first.album.id]);
     expect(memberships.get("link-2")?.sort()).toEqual(
       [first.album.id, second.album.id].sort(),
@@ -436,9 +575,9 @@ describe("listAlbums", () => {
   it("orders by name, ignoring case", async () => {
     const { db } = await freshDatabase();
 
-    await createAlbum(db, { name: "banana", nameKey: "banana" });
-    await createAlbum(db, { name: "Apple", nameKey: "apple" });
-    await createAlbum(db, { name: "cherry", nameKey: "cherry" });
+    await createAlbum(db, makeAlbum("banana"));
+    await createAlbum(db, makeAlbum("Apple"));
+    await createAlbum(db, makeAlbum("cherry"));
 
     const names = (await listAlbums(db)).map((album) => album.name);
 
@@ -483,7 +622,19 @@ describe("listAlbums", () => {
     expect(albums[0]?.firstDomain).toBe("recent.example");
   });
 
-  it("counts and covers only the links on the requested side of the divide", async () => {
+  it("lists only the requested side's albums", async () => {
+    const { db } = await freshDatabase();
+    await createAlbum(db, makeAlbum("Light"));
+    await createAlbum(db, makeAlbum("Dark", "locked"));
+
+    const visible = await listAlbums(db, { scope: "visible" });
+    const locked = await listAlbums(db, { scope: "locked" });
+
+    expect(visible.map((album) => album.name)).toEqual(["Light"]);
+    expect(locked.map((album) => album.name)).toEqual(["Dark"]);
+  });
+
+  it("hides a link that left the album's side after it was filed", async () => {
     const { db } = await freshDatabase();
     const created = await createAlbum(db, ANIME);
     if (!created.ok) throw new Error("setup failed");
@@ -492,24 +643,48 @@ describe("listAlbums", () => {
       thumbnail: "https://example.com/visible.jpg",
     });
     await insertLink(db, {
-      id: "hidden",
+      id: "will-hide",
       domain: "hidden.example",
       thumbnail: "https://hidden.example/cover.jpg",
       updatedAt: 9_000,
     });
     await addLinkToAlbum(db, created.album.id, "visible");
-    await addLinkToAlbum(db, created.album.id, "hidden");
+    await addLinkToAlbum(db, created.album.id, "will-hide");
+
+    // The domain is locked *after* the link was filed, so the membership survives
+    // while the link becomes invisible on this side (the dormant case).
     await lockDomain(db, "hidden.example");
 
     const visible = await listAlbums(db, { scope: "visible" });
-    const locked = await listAlbums(db, { scope: "locked" });
 
+    expect(visible).toHaveLength(1);
     expect(visible[0]?.linkCount).toBe(1);
     expect(visible[0]?.covers).toEqual(["https://example.com/visible.jpg"]);
     expect(visible[0]?.firstDomain).toBe("example.com");
+    // The album lives on the light side, so the locked list never mentions it: the
+    // hidden member is dormant rather than moved.
+    await expect(listAlbums(db, { scope: "locked" })).resolves.toEqual([]);
+  });
+
+  it("counts and covers only the members on a locked album's own side", async () => {
+    const { db } = await freshDatabase();
+    const created = await createAlbum(db, makeAlbum("Anime", "locked"));
+    if (!created.ok) throw new Error("setup failed");
+    await insertLink(db, {
+      id: "hidden",
+      domain: "hidden.example",
+      thumbnail: "https://hidden.example/cover.jpg",
+    });
+    await lockDomain(db, "hidden.example");
+    await addLinkToAlbum(db, created.album.id, "hidden");
+
+    const locked = await listAlbums(db, { scope: "locked" });
+
+    expect(locked).toHaveLength(1);
     expect(locked[0]?.linkCount).toBe(1);
     expect(locked[0]?.covers).toEqual(["https://hidden.example/cover.jpg"]);
     expect(locked[0]?.firstDomain).toBe("hidden.example");
+    await expect(listAlbums(db, { scope: "visible" })).resolves.toEqual([]);
   });
 
   it("costs nothing extra for an album whose links are all hidden", async () => {
@@ -531,7 +706,7 @@ describe("listAlbums", () => {
   it("filters by name, case-insensitively", async () => {
     const { db } = await freshDatabase();
     await createAlbum(db, ANIME);
-    await createAlbum(db, { name: "Movies", nameKey: "movies" });
+    await createAlbum(db, makeAlbum("Movies"));
 
     const matched = await listAlbums(db, { query: "ani" });
     const unmatched = await listAlbums(db, { query: "zzz" });
@@ -542,9 +717,9 @@ describe("listAlbums", () => {
 
   it("respects the limit", async () => {
     const { db } = await freshDatabase();
-    await createAlbum(db, { name: "a", nameKey: "a" });
-    await createAlbum(db, { name: "b", nameKey: "b" });
-    await createAlbum(db, { name: "c", nameKey: "c" });
+    await createAlbum(db, makeAlbum("a"));
+    await createAlbum(db, makeAlbum("b"));
+    await createAlbum(db, makeAlbum("c"));
 
     await expect(listAlbums(db, { limit: 2 })).resolves.toHaveLength(2);
   });
@@ -597,32 +772,45 @@ describe("listAlbumOptions", () => {
   it("is empty before anything is created", async () => {
     const { db } = await freshDatabase();
 
-    await expect(listAlbumOptions(db)).resolves.toEqual([]);
+    await expect(listAlbumOptions(db, "visible")).resolves.toEqual([]);
   });
 
   it("returns every album's id and name, ordered by name", async () => {
     const { db } = await freshDatabase();
-    await createAlbum(db, { name: "banana", nameKey: "banana" });
-    const apple = await createAlbum(db, { name: "Apple", nameKey: "apple" });
+    await createAlbum(db, makeAlbum("banana"));
+    const apple = await createAlbum(db, makeAlbum("Apple"));
     if (!apple.ok) throw new Error("setup failed");
 
-    await expect(listAlbumOptions(db)).resolves.toEqual([
+    await expect(listAlbumOptions(db, "visible")).resolves.toEqual([
       { id: apple.album.id, name: "Apple" },
       { id: expect.any(String), name: "banana" },
     ]);
   });
 
-  it("lists an album whose links are all hidden too, because names are not secret", async () => {
+  it("lists only the requested side's albums", async () => {
     const { db } = await freshDatabase();
-    const created = await createAlbum(db, ANIME);
+    const light = await createAlbum(db, ANIME);
+    const dark = await createAlbum(db, makeAlbum("Anime", "locked"));
+    if (!light.ok || !dark.ok) throw new Error("setup failed");
+
+    // The same label exists on both sides; each popup only ever offers its own.
+    await expect(listAlbumOptions(db, "visible")).resolves.toEqual([
+      { id: light.album.id, name: "Anime" },
+    ]);
+    await expect(listAlbumOptions(db, "locked")).resolves.toEqual([
+      { id: dark.album.id, name: "Anime" },
+    ]);
+  });
+
+  it("never offers a locked album to the light page", async () => {
+    const { db } = await freshDatabase();
+    const created = await createAlbum(db, makeAlbum("Anime", "locked"));
     if (!created.ok) throw new Error("setup failed");
     await insertLink(db, { id: "hidden", domain: "hidden.example" });
     await addLinkToAlbum(db, created.album.id, "hidden");
     await lockDomain(db, "hidden.example");
 
-    await expect(listAlbumOptions(db)).resolves.toEqual([
-      { id: created.album.id, name: "Anime" },
-    ]);
+    await expect(listAlbumOptions(db, "visible")).resolves.toEqual([]);
   });
 });
 
@@ -630,20 +818,19 @@ describe("countAlbums", () => {
   it("is zero before anything is created", async () => {
     const { db } = await freshDatabase();
 
-    await expect(countAlbums(db)).resolves.toBe(0);
+    await expect(countAlbums(db, "visible")).resolves.toBe(0);
+    await expect(countAlbums(db, "locked")).resolves.toBe(0);
   });
 
-  it("counts every album, whichever side its links are on", async () => {
+  it("counts only the albums on the requested side", async () => {
     const { db } = await freshDatabase();
-    const created = await createAlbum(db, ANIME);
-    if (!created.ok) throw new Error("setup failed");
-    await createAlbum(db, { name: "Movies", nameKey: "movies" });
-    await insertLink(db, { id: "hidden", domain: "hidden.example" });
-    await addLinkToAlbum(db, created.album.id, "hidden");
-    await lockDomain(db, "hidden.example");
+    await createAlbum(db, ANIME);
+    await createAlbum(db, makeAlbum("Movies"));
+    await createAlbum(db, makeAlbum("Anime", "locked"));
 
-    // Album names are not secret, so the total is the same on both pages.
-    await expect(countAlbums(db)).resolves.toBe(2);
+    // The count line above the grid describes that page's own list.
+    await expect(countAlbums(db, "visible")).resolves.toBe(2);
+    await expect(countAlbums(db, "locked")).resolves.toBe(1);
   });
 });
 
@@ -651,7 +838,7 @@ describe("listAlbumIdsByLink", () => {
   it("maps each link to the album ids it belongs to", async () => {
     const { db } = await freshDatabase();
     const first = await createAlbum(db, ANIME);
-    const second = await createAlbum(db, { name: "Movies", nameKey: "movies" });
+    const second = await createAlbum(db, makeAlbum("Movies"));
     if (!first.ok || !second.ok) throw new Error("setup failed");
     await insertLink(db, { id: "link-1" });
     await insertLink(db, { id: "link-2" });
@@ -659,7 +846,7 @@ describe("listAlbumIdsByLink", () => {
     await addLinkToAlbum(db, second.album.id, "link-1");
     await addLinkToAlbum(db, first.album.id, "link-2");
 
-    const memberships = await listAlbumIdsByLink(db, ["link-1", "link-2"]);
+    const memberships = await listAlbumIdsByLink(db, ["link-1", "link-2"], "visible");
 
     expect(memberships.get("link-1")?.sort()).toEqual(
       [first.album.id, second.album.id].sort(),
@@ -667,11 +854,36 @@ describe("listAlbumIdsByLink", () => {
     expect(memberships.get("link-2")).toEqual([first.album.id]);
   });
 
+  it("ignores the other side's albums, so their ids never reach the wrong page", async () => {
+    const { db } = await freshDatabase();
+    const light = await createAlbum(db, ANIME);
+    const dark = await createAlbum(db, makeAlbum("Anime", "locked"));
+    if (!light.ok || !dark.ok) throw new Error("setup failed");
+    await insertLink(db, { id: "visible-1" });
+    await insertLink(db, { id: "hidden-1", domain: "hidden.example" });
+    await lockDomain(db, "hidden.example");
+    await addLinkToAlbum(db, light.album.id, "visible-1");
+    await addLinkToAlbum(db, dark.album.id, "hidden-1");
+
+    const visible = await listAlbumIdsByLink(db, ["visible-1"], "visible");
+    const locked = await listAlbumIdsByLink(db, ["hidden-1"], "locked");
+
+    expect(visible.get("visible-1")).toEqual([light.album.id]);
+    expect(locked.get("hidden-1")).toEqual([dark.album.id]);
+    // Neither side's map mentions the other side's album.
+    await expect(
+      listAlbumIdsByLink(db, ["visible-1"], "locked"),
+    ).resolves.toEqual(new Map());
+    await expect(
+      listAlbumIdsByLink(db, ["hidden-1"], "visible"),
+    ).resolves.toEqual(new Map());
+  });
+
   it("omits a link that is in no album", async () => {
     const { db } = await freshDatabase();
     await insertLink(db, { id: "link-1" });
 
-    const memberships = await listAlbumIdsByLink(db, ["link-1"]);
+    const memberships = await listAlbumIdsByLink(db, ["link-1"], "visible");
 
     expect(memberships.get("link-1")).toBeUndefined();
   });
@@ -679,7 +891,7 @@ describe("listAlbumIdsByLink", () => {
   it("accepts an empty list without querying", async () => {
     const { db } = await freshDatabase();
 
-    await expect(listAlbumIdsByLink(db, [])).resolves.toEqual(new Map());
+    await expect(listAlbumIdsByLink(db, [], "visible")).resolves.toEqual(new Map());
   });
 });
 
@@ -695,6 +907,6 @@ describe("deleting a link", () => {
 
     const albums = await listAlbums(db);
     expect(albums[0]?.linkCount).toBe(0);
-    await expect(listAlbumIdsByLink(db, ["link-1"])).resolves.toEqual(new Map());
+    await expect(listAlbumIdsByLink(db, ["link-1"], "visible")).resolves.toEqual(new Map());
   });
 });

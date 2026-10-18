@@ -6,6 +6,7 @@ import { useCallback, useRef, useState } from "react";
 import { AlbumPickerPanel } from "@/components/AlbumPickerPanel";
 import { useSelection } from "@/components/SelectionProvider";
 import type { AlbumOption } from "@/db/albums";
+import { albumScopeForPage } from "@/lib/albums";
 import {
   callApi,
   readBulkAddCounts,
@@ -125,7 +126,11 @@ export function SelectionBar({
 
     // The album has to exist before the links can join it, and the create endpoint
     // answers with the new album, so its id never has to be guessed from the name.
-    const created = await callApi("/api/dashboard/albums", "POST", { name });
+    const created = await callApi("/api/dashboard/albums", "POST", {
+      name,
+      // The selection was made on this page, so the new album belongs to it.
+      scope: albumScopeForPage(locked),
+    });
     const albumId = created.ok ? readCreatedAlbumId(created.data) : null;
 
     if (albumId === null) {

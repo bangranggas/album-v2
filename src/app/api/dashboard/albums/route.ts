@@ -11,7 +11,7 @@ import {
   validationError,
 } from "@/lib/api-response";
 import { extractIp, logEvent } from "@/lib/logger";
-import { parseAlbumName, parseJsonBody } from "@/lib/validation";
+import { parseAlbumCreateInput, parseJsonBody } from "@/lib/validation";
 import { toApiAlbum } from "@/types/api";
 
 export const dynamic = "force-dynamic";
@@ -19,12 +19,12 @@ export const dynamic = "force-dynamic";
 const ROUTE = "/api/dashboard/albums";
 
 /**
- * Creates an album. The name is the whole payload: an album holds no links of its
- * own, so there is nothing else to save at this point.
+ * Creates an album on a named side. The name and the side are the whole payload: an
+ * album holds no links of its own, so there is nothing else to save at this point.
  *
- * Uniqueness is decided by the database's unique index on `name_key` rather than by
- * a read-then-write in this handler, so two tabs creating `Anime` at the same moment
- * cannot both succeed.
+ * Uniqueness is decided by the database's unique index on `(scope, name_key)` rather
+ * than by a read-then-write in this handler, so two tabs creating `Anime` on the same
+ * side at the same moment cannot both succeed — while the other side stays free.
  */
 export async function POST(request: Request): Promise<NextResponse> {
   const ip = extractIp(request);
@@ -43,7 +43,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     return invalidJson();
   }
 
-  const input = parseAlbumName(body.data);
+  const input = parseAlbumCreateInput(body.data);
   if (!input.ok) {
     logEvent(
       "dashboard_album_create_failed",

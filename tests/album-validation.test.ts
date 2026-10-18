@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_ALBUM_NAME_LENGTH,
   MAX_BULK_LINK_IDS,
+  parseAlbumCreateInput,
   parseAlbumLinkInput,
   parseAlbumName,
   parseBulkAlbumLinkInput,
@@ -76,6 +77,59 @@ describe("parseAlbumName", () => {
     expect(parseAlbumName(null).ok).toBe(false);
     expect(parseAlbumName("Anime").ok).toBe(false);
     expect(parseAlbumName([]).ok).toBe(false);
+  });
+});
+
+describe("parseAlbumCreateInput", () => {
+  it("carries the name, its key, and the side the album belongs to", () => {
+    expect(parseAlbumCreateInput({ name: " Anime ", scope: "locked" })).toEqual({
+      ok: true,
+      data: { name: "Anime", nameKey: "anime", scope: "locked" },
+    });
+  });
+
+  it("accepts the visible side", () => {
+    expect(parseAlbumCreateInput({ name: "Read later", scope: "visible" })).toEqual(
+      {
+        ok: true,
+        data: {
+          name: "Read later",
+          nameKey: "read later",
+          scope: "visible",
+        },
+      },
+    );
+  });
+
+  it("applies the same name rules as a rename target", () => {
+    expect(parseAlbumCreateInput({ name: "   ", scope: "visible" }).ok).toBe(false);
+    expect(
+      parseAlbumCreateInput({
+        name: "a".repeat(MAX_ALBUM_NAME_LENGTH + 1),
+        scope: "visible",
+      }).ok,
+    ).toBe(false);
+  });
+
+  it.each([
+    ["a missing scope", { name: "Anime" }],
+    ["a null scope", { name: "Anime", scope: null }],
+    ["an empty scope", { name: "Anime", scope: "" }],
+    ["the link scope's escape hatch", { name: "Anime", scope: "all" }],
+    ["a differently cased side", { name: "Anime", scope: "Visible" }],
+    ["an unknown side", { name: "Anime", scope: "public" }],
+    ["a non-string scope", { name: "Anime", scope: 1 }],
+  ])("rejects %s", (_label, payload) => {
+    const result = parseAlbumCreateInput(payload);
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.message).toContain("scope");
+  });
+
+  it("rejects a payload that is not an object", () => {
+    expect(parseAlbumCreateInput(null).ok).toBe(false);
+    expect(parseAlbumCreateInput("Anime").ok).toBe(false);
+    expect(parseAlbumCreateInput([]).ok).toBe(false);
   });
 });
 

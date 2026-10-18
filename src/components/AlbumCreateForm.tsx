@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
 import { callApi } from "@/lib/dashboard-api";
+import { albumScopeForPage } from "@/lib/albums";
 import { MAX_ALBUM_NAME_LENGTH } from "@/lib/validation";
 
 const FIELD =
@@ -31,7 +32,12 @@ export function AlbumCreateForm({ locked = false }: AlbumCreateFormProps) {
     setError(null);
     setNotice(null);
 
-    const result = await callApi("/api/dashboard/albums", "POST", { name });
+    const result = await callApi("/api/dashboard/albums", "POST", {
+      name,
+      // The side is the page the form is rendered on: an album started here can
+      // never end up on the other side, and there is no move action to repair it.
+      scope: albumScopeForPage(locked),
+    });
 
     setBusy(false);
 

@@ -7,6 +7,8 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
+import type { AlbumScope } from "@/lib/albums";
+
 /**
  * Saved links. One row per unique URL; re-saving a URL updates the existing row.
  *
@@ -66,6 +68,12 @@ export type NewLockedDomain = typeof lockedDomains.$inferInsert;
  * uniqueness key, so `Anime` and `anime` cannot both exist. Storing it as a plain
  * column keeps the constraint a portable unique index instead of an expression
  * index, and makes the conflict check a simple equality.
+ *
+ * `scope` is the side the album lives on: `visible` (the light dashboard) or
+ * `locked` (the passcode-gated area). It is fixed at creation — moving an album
+ * would leave its links behind, because a link's side is decided by its domain —
+ * and it is part of the uniqueness key, so the same label can exist once per side
+ * without a name ever being revealed outside the locked area.
  */
 export const albums = sqliteTable(
   "albums",
@@ -73,9 +81,12 @@ export const albums = sqliteTable(
     id: text("id").primaryKey(),
     name: text("name").notNull(),
     nameKey: text("name_key").notNull(),
+    scope: text("scope").$type<AlbumScope>().notNull().default("visible"),
     createdAt: integer("created_at").notNull(),
   },
-  (table) => [uniqueIndex("albums_name_key_unique").on(table.nameKey)],
+  (table) => [
+    uniqueIndex("albums_scope_name_key_unique").on(table.scope, table.nameKey),
+  ],
 );
 
 /**

@@ -43,15 +43,19 @@ link still lives in `links`, and an album is a named collection of links.
 
 ## 4. Decisions
 
+> **Amended on 2026-10-18 by `docs/album-scope/`.** D3 and D7 below are superseded: albums now
+> have a `scope` column, each page lists only its own side's albums, and uniqueness is per
+> `(scope, name_key)`. The rest of the table still holds.
+
 | # | Decision | Rationale |
 | --- | --- | --- |
 | D1 | Many-to-many: `album_links(album_id, link_id)` with a composite primary key | Owner's choice; a link can sit in several albums, and the key makes a duplicate pair impossible. |
 | D2 | Counts and covers are computed with the same `locked_domains` subquery the link queries use | The hidden/visible rule lives in SQL (see the previous feature's note 1); album metadata must obey it too. |
-| D3 | The album list itself appears on both pages even when the scoped count is 0 | Album names are user labels, not link data. Hiding such an album would make the two tabs disagree about which albums exist. Names, counts, and covers never reveal a hidden link. |
+| D3 | ~~The album list itself appears on both pages even when the scoped count is 0~~ **(amended: each page lists only its own side's albums)** | Album names are user labels, not link data. Hiding such an album would make the two tabs disagree about which albums exist. Names, counts, and covers never reveal a hidden link. |
 | D4 | Two detail routes: `/albums/[id]` (light) and `/locked/albums/[id]` (dark) | Mirrors today's `/` vs `/locked` split: the dark subtree already owns its theme and passcode gate, and a single route with a scope flag could render hidden links on a light page. |
 | D5 | Membership endpoints hang off the link: `POST /api/dashboard/links/:id/albums` and `DELETE /api/dashboard/links/:id/albums/:albumId` | One pair of endpoints serves both UIs: the popup (one link, many albums) and the album page (many links, one album). |
 | D6 | No `GET /api/dashboard/albums` | Pages and popups get their data as server-rendered props, and every mutation ends in `router.refresh()` — the pattern the existing card actions already use. |
-| D7 | Album names are unique, case-insensitively, via stored `name` + `name_key` columns | A unique index on a plain column is deterministic (no expression-index surprises) and testable; `name_key = name.trim().toLowerCase()`. |
+| D7 | Album names are unique, case-insensitively, via stored `name` + `name_key` columns **(amended: unique per side, on `(scope, name_key)`)** | A unique index on a plain column is deterministic (no expression-index surprises) and testable; `name_key = name.trim().toLowerCase()`. |
 | D8 | Albums are ordered by name, case-insensitively | The owner dropped manual ordering; this is stable, predictable, and identical on both pages. |
 | D9 | The albums tab lists at most `ALBUM_LIMIT = 100` albums (the same cap style as links) | Consistent with the existing per-scope 100-row cap; a cap keeps the page bounded. |
 | D10 | Hard deletes: deleting an album removes its memberships only; deleting a link removes its memberships | No trash bin (matching links). The link rows themselves are untouched by an album deletion. |

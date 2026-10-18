@@ -4,6 +4,7 @@ import { addLinkToAlbum } from "@/db/albums";
 import { getDb } from "@/db/client";
 import { requireDashboardSession } from "@/lib/api-auth";
 import {
+  conflict,
   internalError,
   invalidJson,
   jsonOk,
@@ -85,6 +86,24 @@ export async function POST(
       );
 
       return notFound("That link no longer exists.");
+    }
+
+    if (result === "scope-mismatch") {
+      logEvent("dashboard_album_member_add_refused", {
+        route: ROUTE,
+        ip_address: ip,
+        link_id: id,
+        album_id: input.data.albumId,
+        reason: "scope_mismatch",
+      });
+
+      // The album and the link live on different sides of the lock. The message
+      // deliberately does not say which side the album is on: the popup never
+      // offers this pair, so the only way here is a stale page or a hand-made
+      // request, and neither has any business learning about the other side.
+      return conflict(
+        "This album and this link are on different sides of the lock, so the link cannot be added.",
+      );
     }
 
     logEvent("dashboard_album_member_added", {

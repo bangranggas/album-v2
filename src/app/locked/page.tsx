@@ -97,13 +97,14 @@ async function loadLinks(filters: FilterValues): Promise<LockedData> {
     listLockedDomains(db),
     listAllDomains(db),
     countLinks(db, { scope: "locked" }),
-    listAlbumOptions(db),
+    listAlbumOptions(db, "locked"),
   ]);
 
   // One query for the whole page's memberships, rather than one per card.
   const memberships = await listAlbumIdsByLink(
     db,
     links.map((link) => link.id),
+    "locked",
   );
 
   return {
@@ -118,16 +119,16 @@ async function loadLinks(filters: FilterValues): Promise<LockedData> {
 }
 
 /**
- * The albums of the hidden area: the same list as `/`, counted and covered from
- * the hidden side only. Album names are shared between the two pages on purpose —
- * they are labels, not link data.
+ * The albums of the hidden area: its own list, counted and covered from the hidden
+ * side only. An album created here lives here; the light page never lists it, and
+ * this page never lists a light album.
  */
 async function loadAlbums(query: string): Promise<AlbumsData> {
   const db = getDb();
 
   const [albums, total] = await Promise.all([
     listAlbums(db, { scope: "locked", query, limit: PAGE_LIMIT }),
-    countAlbums(db),
+    countAlbums(db, "locked"),
   ]);
 
   return { albums, total };

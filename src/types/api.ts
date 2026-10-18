@@ -60,6 +60,8 @@ export function toApiLink(row: Link): ApiLink {
 export interface ApiAlbum {
   id: string;
   name: string;
+  /** Which page the album belongs to; the client shows it and never moves it. */
+  scope: string;
   createdAt: string;
 }
 
@@ -67,6 +69,7 @@ export function toApiAlbum(row: Album): ApiAlbum {
   return {
     id: row.id,
     name: row.name,
+    scope: row.scope,
     createdAt: new Date(row.createdAt).toISOString(),
   };
 }
