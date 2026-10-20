@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { links } from "@/db/schema";
-import { createTestDatabase, type TestDatabase } from "./helpers/test-db";
+import {
+  createTestDatabase,
+  readMigrationStatements,
+  type TestDatabase,
+} from "./helpers/test-db";
 
 describe("test database helper", () => {
   let testDatabase: TestDatabase | undefined;
@@ -51,5 +55,18 @@ describe("test database helper", () => {
     await expect(
       db.insert(links).values({ ...row, id: "link-2" }),
     ).rejects.toThrow();
+  });
+
+  it("can stop at an older migration, so a later one can be replayed on real data", async () => {
+    const all = readMigrationStatements();
+    const beforeLatest = readMigrationStatements({ before: "0004" });
+    const latest = readMigrationStatements({ from: "0004" });
+
+    // Every statement is in exactly one of the two halves, in order — that is what
+    // lets a test build the old schema, fill it, and then migrate it forward.
+    expect(beforeLatest.length + latest.length).toBe(all.length);
+    expect(all.slice(0, beforeLatest.length)).toEqual(beforeLatest);
+    expect(all.slice(beforeLatest.length)).toEqual(latest);
+    expect(latest.length).toBeGreaterThan(0);
   });
 });
