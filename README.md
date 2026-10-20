@@ -10,7 +10,8 @@ server never scrapes anything and can run entirely on free tiers.
 - **Link management:** star a link as a favorite, edit its title/URL/thumbnail, delete it, or
   add one by hand — from the dashboard.
 - **Albums:** a second tab on both dashboards (`?tab=albums`) where links can be grouped into
-  named collections. A link can sit in several albums, and the link itself never moves.
+  named collections. A link can sit in several albums, and the link itself never moves. Each
+  album belongs to one page — `/` or `/locked` — and is only ever listed there.
 - **Bulk filing:** tick several cards at once and file them all into one album in a single
   action — including into an album created on the spot.
 - **Locked area:** `/locked` — a dark, passcode-protected page where domains can be marked as
@@ -22,8 +23,9 @@ Planning and design documents live in [`docs/instant-link-collector/`](docs/inst
 the login page / navbar work in [`docs/dashboard-login-navbar/`](docs/dashboard-login-navbar),
 the filter work in [`docs/dashboard-filters/`](docs/dashboard-filters), the locked area /
 link management in [`docs/locked-domains-and-link-management/`](docs/locked-domains-and-link-management),
-albums in [`docs/albums/`](docs/albums), and bulk album filing in
-[`docs/bulk-album-assign/`](docs/bulk-album-assign).
+albums in [`docs/albums/`](docs/albums), bulk album filing in
+[`docs/bulk-album-assign/`](docs/bulk-album-assign), and per-page albums in
+[`docs/album-scope/`](docs/album-scope).
 
 ---
 
@@ -96,7 +98,9 @@ recreate the tables it already has. For that case run the statements in
 `drizzle/0001_*.sql` against it directly — they add the column, index it, and backfill every
 existing row. A database created before favorites and locked domains existed needs the same
 treatment for `drizzle/0002_*.sql`, which adds `links.is_favorite` and the `locked_domains`
-table.
+table. Likewise `drizzle/0004_*.sql` gives albums their `scope` column: beyond the DDL it carries
+a backfill `UPDATE` that moves an album whose members are all hidden onto the locked side, so a
+`db:push` alone (which only syncs the shape) must be followed by that `UPDATE`.
 
 Start the app:
 
@@ -333,18 +337,24 @@ the original link, and the same link can sit in several albums.
 | `?tab=albums` | Opens the Albums tab. Anything else (including no parameter) is the Links tab. |
 | `?aq=` | Album-name search, case-insensitive. The links tab keeps `q` / `domain` / `favorite`, and each tab ignores the other's parameters. |
 
-- **The album list** shows every album, ordered by name, with a 2×2 collage of the four most
-  recently updated thumbnails in it, its name, and how many links it holds *on that page's
+- **The album list** shows that page's albums, ordered by name, with a 2×2 collage of the four
+  most recently updated thumbnails in it, its name, and how many links it holds *on that page's
   side*. One thumbnail fills the whole tile; an album without thumbnails shows a grey tile
   named after its first domain, and an empty one shows a folder glyph. `New album` creates one,
   and the search box narrows the list.
+- **Every album belongs to one page.** An album created on `/` is a light album; one created on
+  `/locked` is a locked album. Each page lists, counts, and searches only its own, and the
+  "add to album" panel on a card (and in the bulk bar) only offers that page's albums — so a
+  locked album's name never appears on the light page at all. There is no move action: an album
+  is created on the side it belongs to. Album names are unique *per side*, so `Anime` may exist
+  once on each, and a duplicate on the same side is refused with `409`.
 - **The album page** (`/albums/<id>`, or `/locked/albums/<id>` in the hidden area) shows the
   album's links in the usual grid, with the full filter set — search, domain, favorites —
   applied *inside* the album. Its count line reads `N of M links`.
 - **Adding a link to albums** happens from the card: the folder button opens a small panel
-  listing every album as a checkbox (ticked = already in it). Checking adds, unchecking removes,
-  and `+ New album…` creates one and files the link into it in the same flow. No browser
-  popups: the panel closes on `Done`, `Escape`, or a click outside.
+  listing the page's albums as checkboxes (ticked = already in it). Checking adds, unchecking
+  removes, and `+ New album…` creates one on this page and files the link into it in the same
+  flow. No browser popups: the panel closes on `Done`, `Escape`, or a click outside.
 - **Managing an album**: the pencil renames it (inline), the trash can asks for confirmation
   inside the card, and both are permanent in the same way link deletes are. Deleting an album
   deletes only the album — its links stay on the main list. On an album page, each card also
@@ -364,11 +374,13 @@ the original link, and the same link can sit in several albums.
   make a shared link unreadable — so a reload starts from nothing.
 - **Albums obey the hidden/visible rule.** Counts and covers are computed with the same
   `locked_domains` condition the link queries use, so a hidden link cannot reach `/` through an
-  album's count, cover, or placeholder domain. Album *names* are labels, not link data, so the
-  same album shows on both pages and each page reports its own side's numbers.
-- Album names are unique ignoring case and surrounding whitespace (`Anime` and `anime` cannot
-  both exist), rename-to-the-same-name is a harmless no-op, and a name that duplicates another
-  album is refused with `409`.
+  album's count, cover, or placeholder domain. Filing is guarded too: a locked link can only join
+  a locked album and a visible link only a visible one (`409` otherwise), and a membership whose
+  link later changes side simply stops showing until the link comes back. Nothing is deleted, so
+  unlock the domain and the link reappears in its album.
+- Album names are unique ignoring case and surrounding whitespace *within a side* (`Anime` and
+  `anime` cannot both exist on `/`), rename-to-the-same-name is a harmless no-op, and opening an
+  album's detail URL on the wrong side answers `404` exactly like an unknown id.
 
 ### The locked area
 
@@ -399,11 +411,11 @@ These are called by the dashboard itself and are authenticated by the `lc_sessio
 | `POST /api/dashboard/links` | `{ url, title?, thumbnail? }` | Adds a link by hand. `title` falls back to `host + path`. |
 | `PATCH /api/dashboard/links/:id` | any of `{ title, url, thumbnail, isFavorite }` | Edits a link. `409` when the URL belongs to another link, `404` when the link is gone. |
 | `DELETE /api/dashboard/links/:id` | — | Permanent, and also removes the link from every album. `404` when there was nothing to delete. |
-| `POST /api/dashboard/links/:id/albums` | `{ albumId }` | Puts the link in an album. Idempotent: `{ added: false }` when it was already there, `404` when the album or link is gone. |
+| `POST /api/dashboard/links/:id/albums` | `{ albumId }` | Puts the link in an album. Idempotent: `{ added: false }` when it was already there, `404` when the album or link is gone, `409` when the album is on the other side of the lock (nothing is written). |
 | `DELETE /api/dashboard/links/:id/albums/:albumId` | — | Takes the link out of one album, leaving the link and its other albums alone. |
-| `POST /api/dashboard/albums/:id/links` | `{ linkIds: [...] }` | Files a whole selection into one album, in one transaction. Answers `{ added, alreadyIn, skipped }`; ids that no longer exist are skipped instead of being written. `400` for a missing/empty/over-long list (200 ids max), `404` when the album is gone. |
-| `POST /api/dashboard/albums` | `{ name }` | Creates an album. `201` with the album, `400` for a blank/over-long name, `409` for a name another album has. |
-| `PATCH /api/dashboard/albums/:id` | `{ name }` | Renames. `404` when gone, `409` on a name clash; renaming to its own name (in any case) succeeds. |
+| `POST /api/dashboard/albums/:id/links` | `{ linkIds: [...] }` | Files a whole selection into one album, in one transaction. Answers `{ added, alreadyIn, skipped }`; ids that no longer exist — or that are on the other side of the lock — are skipped instead of being written. `400` for a missing/empty/over-long list (200 ids max), `404` when the album is gone. |
+| `POST /api/dashboard/albums` | `{ name, scope }` | Creates an album on `"visible"` or `"locked"`. `201` with the album, `400` for a blank/over-long name or a missing/unknown `scope` (nothing is written), `409` for a name another album on that same side has. |
+| `PATCH /api/dashboard/albums/:id` | `{ name }` | Renames. `404` when gone, `409` on a name clash inside the album's own side; renaming to its own name (in any case) succeeds. `scope` cannot be changed. |
 | `DELETE /api/dashboard/albums/:id` | — | Deletes the album and its memberships. The links stay. |
 | `POST /api/locked/unlock` | `{ passcode }` | Sets `lc_locked` for one hour. |
 | `POST /api/locked/lock` | — | Clears `lc_locked`. |
@@ -458,18 +470,19 @@ applied, so no cloud credentials and no cleanup are required.
 | `tests/logger.test.ts` | Event shape, domain/IP extraction, serialization safety |
 | `tests/link-filters.test.ts` | `?q=` / `?domain=` / `?favorite=` normalisation, tab (`?tab=`) and album-search (`?aq=`) resolution, URL building, count formatting |
 | `tests/links-repository.test.ts` | Insert vs update, upsert idempotency, concurrent saves, ordering, scope (visible vs. locked), domain filter, favorite filter, album filter, search (incl. escaped `%`/`_`), domain list, counts |
-| `tests/album-validation.test.ts` | Album name/membership payloads: trimming, blank rejection, the 100-character cap, the derived `nameKey`, and bulk `linkIds` lists (trimming, dedupe, the 200-id cap) |
-| `tests/albums-repository.test.ts` | Album create/rename/delete, scoped counts + covers + placeholder domain, membership add/remove idempotency, bulk add counts (new / already-in / unknown) with no orphan rows, and that deleting a link clears its memberships |
-| `tests/albums-lib.test.ts` | Cover-collage slots (`COLLAGE_SLOTS`), album count formatting, detail-page hrefs for both themes |
+| `tests/album-validation.test.ts` | Album name/membership payloads: trimming, blank rejection, the 100-character cap, the derived `nameKey`, the required `visible`/`locked` scope, and bulk `linkIds` lists (trimming, dedupe, the 200-id cap) |
+| `tests/albums-repository.test.ts` | Album create/rename/delete, per-side listing and counting, per-side option lists and membership maps, same name on both sides, cross-side rename, scoped counts + covers + placeholder domain, membership add/remove idempotency (including the `scope-mismatch` refusal and the dormant case), bulk add counts with no orphan rows, and that deleting a link clears its memberships |
+| `tests/albums-lib.test.ts` | Cover-collage slots (`COLLAGE_SLOTS`), album count formatting, detail-page hrefs for both themes, and the page → side mapping (`albumScopeForPage`, `isAlbumScope`) |
+| `tests/album-scope-migration.test.ts` | The `0004` data migration: builds the pre-scope schema, inserts legacy albums (hidden-only, mixed, empty, visible-only), applies the real SQL, and checks the side each album lands on, that no membership/link/locked-domain row is lost, and that the index became per-side |
 | `tests/link-selection.test.ts` | The bulk selection rules: toggle, union/dedupe, remove, visible-vs-out-of-view partition, the bar's label, and the post-add report |
-| `tests/album-routes.test.ts` | The six album + membership handlers: session gating, `400`/`404`/`409`, idempotent membership, bulk add counts, and that `nameKey` never leaves the server |
+| `tests/album-routes.test.ts` | The six album + membership handlers: session gating, `400`/`404`/`409`, required scope, cross-side membership refusal, idempotent membership, bulk add counts, and that `nameKey` never leaves the server |
 | `tests/dashboard-api.test.ts` | The client fetch helper (payload on success, message/status on failure, a request that never left the browser) and the two defensive payload readers |
 | `tests/sql-support.test.ts` | Shared SQL helpers: LIKE-pattern escaping and unique-violation detection through drizzle's error wrapper |
 | `tests/locked-domains-repository.test.ts` | Locking, unlocking, idempotency, and that a locked domain hides its links |
 | `tests/api-links.test.ts` | Full `POST`/`GET`/`OPTIONS` behaviour, status codes, CORS, analytics events |
 | `tests/time.test.ts` | Relative-time formatting boundaries |
 | `tests/userscript.test.ts` | Blacklist rules and metadata extraction, run in a Node `vm` harness |
-| `tests/test-db-helper.test.ts` | Migration application and the unique index on `url` |
+| `tests/test-db-helper.test.ts` | Migration application (including the `before`/`from` filters a mid-history migration test needs) and the unique index on `url` |
 
 ---
 
@@ -533,13 +546,15 @@ is met by the serverless function.
 - **Hidden means hidden by query, not by the interface.** Locked domains are excluded inside
   the repository SQL, so a locked link cannot leak through the list, the search, the domain
   dropdown, the count, or — since albums — an album's count, cover collage, or placeholder
-  domain; there is no code path that forgets to filter.
+  domain; there is no code path that forgets to filter. Albums themselves are scoped too: the
+  light page only reads `visible` albums, and a locked album's name or id never reaches it.
 - **Link and album mutations need the dashboard session.** Editing, deleting, and adding links,
   filing a link (or a whole selection) into an album, and creating/renaming/deleting an album all
   go through session-gated endpoints; changing what is hidden needs the session *and* the
   passcode. Ids are UUIDs, so they cannot be guessed from outside. The bulk endpoint only ever
-  *writes* memberships, and any id it does not find in `links` is skipped instead of stored, so
-  even a hand-made request cannot leave a row behind that no page could ever show.
+  *writes* memberships, and any id it does not find in `links` — or that is on the other side of
+  the lock — is skipped instead of stored, so even a hand-made request cannot leave a row behind
+  that no page could ever show.
 - **Rotating `SECRET_KEY`** immediately invalidates the userscript; update `CONFIG.SECRET_KEY`
   after rotating. It is separate from the dashboard login, which keeps working.
 - **No scraping.** The dependency tree contains no browser automation or HTML parsing
@@ -616,13 +631,13 @@ src/
     SetupProblem.tsx        shown when the database is unreachable
   db/
     client.ts               lazy libSQL client + drizzle instance, cached per URL
-    albums.ts               album CRUD + memberships + scoped counts/covers (album SQL)
+    albums.ts               album CRUD + memberships + per-side, scoped counts/covers (album SQL)
     links.ts                upsertLink + listLinks/listDomains/countLinks/updateLink/deleteLink (the only link SQL)
     locked-domains.ts       listLockedDomains + lockDomain/unlockDomain
     schema.ts               links + locked_domains + albums + album_links tables
     sql-support.ts          shared LIKE escaping + unique-violation detection
   lib/
-    albums.ts               collage slots, count formatting, album detail hrefs
+    albums.ts               collage slots, count formatting, album detail hrefs, page -> side mapping
     api-auth.ts             session/passcode guards shared by the dashboard endpoints
     api-response.ts         JSON response builders (ok / 4xx / 5xx)
     auth.ts                 x-secret-key verification (userscript API)
