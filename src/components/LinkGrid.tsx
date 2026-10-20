@@ -58,6 +58,7 @@ export function LinkGrid({
             albums={albums}
             memberAlbumIds={memberships?.get(link.id) ?? []}
             removeFromAlbumId={removeFromAlbumId}
+            basePath={basePath}
           />
         </li>
       ))}

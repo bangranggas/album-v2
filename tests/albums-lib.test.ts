@@ -7,6 +7,8 @@ import {
   collageSlots,
   formatAlbumCount,
   isAlbumScope,
+  MEMBERSHIP_PREVIEW_LIMIT,
+  membershipPreview,
 } from "@/lib/albums";
 
 describe("formatAlbumCount", () => {
@@ -68,6 +70,76 @@ describe("albumScopeForPage", () => {
 
   it("puts an album started on the locked page on the locked side", () => {
     expect(albumScopeForPage(true)).toBe("locked");
+  });
+});
+
+describe("membershipPreview", () => {
+  const albumList = [
+    { id: "a", name: "Anime" },
+    { id: "b", name: "Books" },
+    { id: "c", name: "Cooking" },
+    { id: "d", name: "Design" },
+    { id: "e", name: "Elsewhere" },
+  ];
+
+  it("shows nothing for a link that is in no album", () => {
+    expect(membershipPreview([], albumList)).toEqual({ shown: [], hidden: [] });
+  });
+
+  it("shows every name while the list is short enough", () => {
+    const preview = membershipPreview(["a", "c"], albumList);
+
+    expect(preview.shown.map((album) => album.name)).toEqual(["Anime", "Cooking"]);
+    expect(preview.hidden).toEqual([]);
+  });
+
+  it("splits at the preview limit", () => {
+    const preview = membershipPreview(["a", "b", "c", "d"], albumList);
+
+    expect(preview.shown.map((album) => album.name)).toEqual([
+      "Anime",
+      "Books",
+      "Cooking",
+    ]);
+    expect(preview.hidden.map((album) => album.name)).toEqual(["Design"]);
+    expect(MEMBERSHIP_PREVIEW_LIMIT).toBe(3);
+  });
+
+  it("keeps the album list's order, not the order the ids arrive in", () => {
+    const preview = membershipPreview(["d", "a", "c"], albumList);
+
+    expect(preview.shown.map((album) => album.name)).toEqual([
+      "Anime",
+      "Cooking",
+      "Design",
+    ]);
+  });
+
+  it("ignores ids whose album is gone", () => {
+    const preview = membershipPreview(["a", "deleted-in-another-tab"], albumList);
+
+    expect(preview.shown.map((album) => album.name)).toEqual(["Anime"]);
+    expect(preview.hidden).toEqual([]);
+  });
+
+  it("does not repeat a name when an id appears twice", () => {
+    const preview = membershipPreview(["a", "a"], albumList);
+
+    expect(preview.shown).toHaveLength(1);
+  });
+
+  it("accepts another limit", () => {
+    const preview = membershipPreview(["a", "b", "c", "d"], albumList, 2);
+
+    expect(preview.shown.map((album) => album.name)).toEqual(["Anime", "Books"]);
+    expect(preview.hidden.map((album) => album.name)).toEqual(["Cooking", "Design"]);
+  });
+
+  it("counts only albums that exist when applying the limit", () => {
+    const preview = membershipPreview(["gone", "gone-2", "b", "c"], albumList, 2);
+
+    expect(preview.shown.map((album) => album.name)).toEqual(["Books", "Cooking"]);
+    expect(preview.hidden).toEqual([]);
   });
 });
 

@@ -1,5 +1,6 @@
+import { AlbumMembershipLabel } from "@/components/AlbumMembershipLabel";
 import { LinkActions } from "@/components/LinkActions";
-import { SelectCheckbox } from "@/components/SelectCheckbox";
+import { LinkCover } from "@/components/LinkCover";
 import type { AlbumOption } from "@/db/albums";
 import type { Link } from "@/db/schema";
 import { formatRelativeTime } from "@/lib/time";
@@ -23,6 +24,8 @@ export interface LinkCardProps {
   memberAlbumIds?: readonly string[];
   /** Set on an album's page, where "remove from this album" makes sense. */
   removeFromAlbumId?: string;
+  /** `/` or `/locked`: where the card's album links point. */
+  basePath?: string;
 }
 
 export function LinkCard({
@@ -31,6 +34,7 @@ export function LinkCard({
   albums,
   memberAlbumIds,
   removeFromAlbumId,
+  basePath = "/",
 }: LinkCardProps) {
   const host = link.domain === "" ? hostOf(link.url) : link.domain;
 
@@ -41,25 +45,12 @@ export function LinkCard({
         "add to album" popup can overflow the card instead of being cut off.
       */}
       <div className="relative flex aspect-video items-center justify-center overflow-hidden rounded-t-xl bg-slate-100 dark:bg-slate-800">
-        <SelectCheckbox linkId={link.id} label={link.title} />
-
-        {link.thumbnail ? (
-          // Plain <img> on purpose: thumbnails come from arbitrary third-party
-          // hosts, and next/image would add remote-pattern config plus Vercel
-          // image-optimization usage. The project targets zero infrastructure cost.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={link.thumbnail}
-            alt=""
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <span className="px-4 text-center text-sm font-medium text-slate-400 dark:text-slate-500">
-            {host}
-          </span>
-        )}
+        <LinkCover
+          linkId={link.id}
+          title={link.title}
+          thumbnail={link.thumbnail}
+          host={host}
+        />
 
         {link.isFavorite ? (
           <span
@@ -86,6 +77,14 @@ export function LinkCard({
         >
           {link.title}
         </h2>
+
+        {albums === undefined ? null : (
+          <AlbumMembershipLabel
+            albumIds={memberAlbumIds ?? []}
+            albums={albums}
+            basePath={basePath}
+          />
+        )}
 
         <p className="mt-auto flex flex-wrap items-center gap-x-2 text-xs text-slate-500 dark:text-slate-400">
           <span className="truncate" title={link.url}>

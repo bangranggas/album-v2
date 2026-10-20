@@ -67,3 +67,34 @@ export function albumHref(albumId: string, basePath = "/"): string {
 
   return basePath === "/" ? `/albums/${segment}` : `${basePath}/albums/${segment}`;
 }
+
+/** How many album names a card shows before the rest collapse into `+N`. */
+export const MEMBERSHIP_PREVIEW_LIMIT = 3;
+
+/** The part of an album a membership label needs — structurally an `AlbumOption`. */
+export interface AlbumNameRef {
+  id: string;
+  name: string;
+}
+
+/**
+ * Splits a link's album memberships into the names the card shows and the ones it
+ * hides behind `+N`.
+ *
+ * It walks the page's own album list instead of the membership ids, which gives two
+ * things for free: the names come out in the Albums tab's order (by name), and an id
+ * whose album was deleted in another tab is dropped rather than rendered as a dangling
+ * link. The list is already scoped to this page's side, so nothing else is filtered here.
+ */
+export function membershipPreview(
+  memberAlbumIds: readonly string[],
+  albums: readonly AlbumNameRef[],
+  limit = MEMBERSHIP_PREVIEW_LIMIT,
+): { shown: AlbumNameRef[]; hidden: AlbumNameRef[] } {
+  const memberIds = new Set(memberAlbumIds);
+  // Filtering the album list (rather than mapping the ids) also means an id that
+  // appears twice cannot produce the same name twice.
+  const members = albums.filter((album) => memberIds.has(album.id));
+
+  return { shown: members.slice(0, limit), hidden: members.slice(limit) };
+}

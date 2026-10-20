@@ -24,8 +24,9 @@ the login page / navbar work in [`docs/dashboard-login-navbar/`](docs/dashboard-
 the filter work in [`docs/dashboard-filters/`](docs/dashboard-filters), the locked area /
 link management in [`docs/locked-domains-and-link-management/`](docs/locked-domains-and-link-management),
 albums in [`docs/albums/`](docs/albums), bulk album filing in
-[`docs/bulk-album-assign/`](docs/bulk-album-assign), and per-page albums in
-[`docs/album-scope/`](docs/album-scope).
+[`docs/bulk-album-assign/`](docs/bulk-album-assign), per-page albums in
+[`docs/album-scope/`](docs/album-scope), and the card's cover/membership affordances in
+[`docs/link-card-affordances/`](docs/link-card-affordances).
 
 ---
 
@@ -355,11 +356,18 @@ the original link, and the same link can sit in several albums.
   listing the page's albums as checkboxes (ticked = already in it). Checking adds, unchecking
   removes, and `+ New album…` creates one on this page and files the link into it in the same
   flow. No browser popups: the panel closes on `Done`, `Escape`, or a click outside.
+- **Every card says which albums already hold it.** Under the title, a muted line reads
+  `In Anime, Work, Ideas`; each name links to that album on the same page, so a light card
+  links to `/albums/<id>` and a dark one to `/locked/albums/<id>`. Past three albums the rest
+  collapse into `+N`, whose tooltip names them. The line only ever uses the page's own album
+  list, so a locked album's name cannot appear on `/`.
 - **Managing an album**: the pencil renames it (inline), the trash can asks for confirmation
   inside the card, and both are permanent in the same way link deletes are. Deleting an album
   deletes only the album — its links stay on the main list. On an album page, each card also
   offers `Remove from this album`, which never deletes the link itself.
-- **Filing many links at once** happens on the **Links** tab. Every card has a checkbox, and as
+- **Filing many links at once** happens on the **Links** tab. Every card has a checkbox, and the
+  whole cover is that checkbox's label — clicking the thumbnail (or the domain placeholder when
+  there is no image) ticks the card just like the box, and a second click unticks it. As
   soon as one is ticked an action bar appears at the bottom of the screen with the selection
   count, `Add to album`, and `Clear`. `Select all on this page` ticks every card the page is
   rendering (filters and the 100-row cap included), and when a filter hides part of the
@@ -472,8 +480,9 @@ applied, so no cloud credentials and no cleanup are required.
 | `tests/links-repository.test.ts` | Insert vs update, upsert idempotency, concurrent saves, ordering, scope (visible vs. locked), domain filter, favorite filter, album filter, search (incl. escaped `%`/`_`), domain list, counts |
 | `tests/album-validation.test.ts` | Album name/membership payloads: trimming, blank rejection, the 100-character cap, the derived `nameKey`, the required `visible`/`locked` scope, and bulk `linkIds` lists (trimming, dedupe, the 200-id cap) |
 | `tests/albums-repository.test.ts` | Album create/rename/delete, per-side listing and counting, per-side option lists and membership maps, same name on both sides, cross-side rename, scoped counts + covers + placeholder domain, membership add/remove idempotency (including the `scope-mismatch` refusal and the dormant case), bulk add counts with no orphan rows, and that deleting a link clears its memberships |
-| `tests/albums-lib.test.ts` | Cover-collage slots (`COLLAGE_SLOTS`), album count formatting, detail-page hrefs for both themes, and the page → side mapping (`albumScopeForPage`, `isAlbumScope`) |
+| `tests/albums-lib.test.ts` | Cover-collage slots (`COLLAGE_SLOTS`), album count formatting, detail-page hrefs for both themes, the page → side mapping (`albumScopeForPage`, `isAlbumScope`), and the card's membership preview (limit, album order, deleted ids) |
 | `tests/album-scope-migration.test.ts` | The `0004` data migration: builds the pre-scope schema, inserts legacy albums (hidden-only, mixed, empty, visible-only), applies the real SQL, and checks the side each album lands on, that no membership/link/locked-domain row is lost, and that the index became per-side |
+| `tests/link-card-affordances.test.ts` | The card's two affordances, rendered with `react-dom/server`: the cover is the checkbox's label on a selection page and inert on an album page, the checkbox keeps its `Select <title>` name, and the `In …` line lists album order, links to the right side, and collapses to `+N` |
 | `tests/link-selection.test.ts` | The bulk selection rules: toggle, union/dedupe, remove, visible-vs-out-of-view partition, the bar's label, and the post-add report |
 | `tests/album-routes.test.ts` | The six album + membership handlers: session gating, `400`/`404`/`409`, required scope, cross-side membership refusal, idempotent membership, bulk add counts, and that `nameKey` never leaves the server |
 | `tests/dashboard-api.test.ts` | The client fetch helper (payload on success, message/status on failure, a request that never left the browser) and the two defensive payload readers |
@@ -609,12 +618,14 @@ src/
     AlbumCover.tsx          the 2×2 collage, grey placeholder, folder glyph
     AlbumCreateForm.tsx     "New album" form on the Albums tab
     AlbumGrid.tsx           the album grid and its two empty states
+    AlbumMembershipLabel.tsx  "In Anime, Work +2" under a card's title
     AlbumPickerPanel.tsx    the shared album panel (toggle one link / file a selection)
     AlbumSearch.tsx         album-name search, drives `?aq=`
     DashboardTabs.tsx       the Links / Albums tab strip (`?tab=`)
     EmptyState.tsx          onboarding copy when there are no links
     LinkActions.tsx         star / add to album / inline edit / two-step delete
-    LinkCard.tsx            thumbnail / title / domain / open button / selection checkbox
+    LinkCard.tsx            cover / title / album names / domain / open button
+    LinkCover.tsx           thumbnail or domain placeholder, plus the selection checkbox
     LinkFilters.tsx         search + domain + favorites, drives the URL
     LinkGrid.tsx            the card grid, its "no matches" state, and multi-select wiring
     LockedDomainsPanel.tsx  list, add, and unlock hidden domains
@@ -625,7 +636,6 @@ src/
     NoMatches.tsx           shown when links exist but none match the filters
     PasscodeNotConfigured.tsx  shown when LOCKED_PASSCODE is unset or blank
     SelectAllToggle.tsx     "select all on this page" above the grid
-    SelectCheckbox.tsx      one card's selection checkbox (nothing without a provider)
     SelectionBar.tsx        the floating bar: count, out of view, add to album, clear
     SelectionProvider.tsx   the bulk selection state shared by the grid
     SetupProblem.tsx        shown when the database is unreachable
