@@ -25,8 +25,9 @@ the filter work in [`docs/dashboard-filters/`](docs/dashboard-filters), the lock
 link management in [`docs/locked-domains-and-link-management/`](docs/locked-domains-and-link-management),
 albums in [`docs/albums/`](docs/albums), bulk album filing in
 [`docs/bulk-album-assign/`](docs/bulk-album-assign), per-page albums in
-[`docs/album-scope/`](docs/album-scope), and the card's cover/membership affordances in
-[`docs/link-card-affordances/`](docs/link-card-affordances).
+[`docs/album-scope/`](docs/album-scope), the card's cover/membership affordances in
+[`docs/link-card-affordances/`](docs/link-card-affordances), and the album-membership filter in
+[`docs/album-membership-filter/`](docs/album-membership-filter).
 
 ---
 
@@ -290,18 +291,26 @@ blank, gated pages answer `503` instead of rendering.
 
 ### Filtering and search
 
-The dashboard list can be narrowed by domain, by favorites, and by free text, and the filter
-state lives in the URL, so a filtered view can be reloaded, bookmarked, and shared.
+The dashboard list can be narrowed by domain, by **album membership**, by favorites, and by
+free text, and the filter state lives in the URL, so a filtered view can be reloaded,
+bookmarked, and shared.
 
 | Parameter | Meaning |
 | --- | --- |
 | `?domain=` | Exact domain match, e.g. `/?domain=www.indoav.com`. Lowercased before it is matched, so `?domain=Example.COM` works. |
+| `?album=in` / `?album=none` | Only links filed into at least one album on this side, or only links filed into none. Omit the parameter for every link. |
 | `?q=` | Case-insensitive substring of the **title** or the **url** (which also covers the domain), e.g. `/?q=hotel`. `%` and `_` are matched literally, not as wildcards. |
 | `?favorite=1` | Only starred links. `1`, `true`, `on`, and `yes` all switch it on; anything else is off. |
 
-All three can be combined (`/?domain=example.com&q=hotel&favorite=1`) and all are optional; an
-empty or whitespace-only value means "no filter". Over-long values are truncated (200
-characters for the search, 253 for the domain) rather than ignored.
+All four can be combined (`/?domain=example.com&album=in&q=hotel&favorite=1`) and all are
+optional; an empty or whitespace-only value means "no filter". Over-long values are truncated
+(200 characters for the search, 253 for the domain) rather than ignored.
+
+The album filter is **side-scoped**: `/` counts memberships in visible albums only, and
+`/locked` counts the locked ones, so a hidden album's name, count, and cover never reach the
+light page. A link that sits in several albums still appears once. Album detail pages do not
+offer the control (every link there is already inside that album) and ignore the parameter if
+a shared URL carries one.
 
 Filtering and the 100-row cap are one query, so the limit applies to the **filtered** result:
 narrowing the view never hides a match behind the cap. The dropdown is always built from
@@ -396,8 +405,8 @@ the original link, and the same link can sit in several albums.
 right of the filter bar on `/`; without a passcode cookie you land on `/locked/unlock`, which
 asks for `LOCKED_PASSCODE`.
 
-- The page lists **only** links whose domain is locked, with the same filter bar, favorites
-  filter, card actions, and manual add form as `/`.
+- The page lists **only** links whose domain is locked, with the same filter bar (including
+  the album-membership dropdown), favorites filter, card actions, and manual add form as `/`.
 - The **Locked domains** panel lists every hidden domain with its link count, and can add or
   remove one. Locking applies to the domain, so links saved to it later are hidden too.
 - Access lasts **one hour**; `Lock now` ends it immediately. The cookie (`lc_locked`) is
@@ -476,8 +485,8 @@ applied, so no cloud credentials and no cleanup are required.
 | `tests/proxy.test.ts` | Redirect vs. allow vs. `503`, `?next=` handling, matcher exclusions |
 | `tests/redirect.test.ts` | `?next=` sanitising (open-redirect protection), including the blocked prefixes |
 | `tests/logger.test.ts` | Event shape, domain/IP extraction, serialization safety |
-| `tests/link-filters.test.ts` | `?q=` / `?domain=` / `?favorite=` normalisation, tab (`?tab=`) and album-search (`?aq=`) resolution, URL building, count formatting |
-| `tests/links-repository.test.ts` | Insert vs update, upsert idempotency, concurrent saves, ordering, scope (visible vs. locked), domain filter, favorite filter, album filter, search (incl. escaped `%`/`_`), domain list, counts |
+| `tests/link-filters.test.ts` | `?q=` / `?domain=` / `?album=` / `?favorite=` normalisation, tab (`?tab=`) and album-search (`?aq=`) resolution, URL building (including parameter order), count formatting |
+| `tests/links-repository.test.ts` | Insert vs update, upsert idempotency, concurrent saves, ordering, scope (visible vs. locked), domain filter, favorite filter, album filter, album-membership filter (in/none, both sides, no duplicate rows), search (incl. escaped `%`/`_`), domain list, counts |
 | `tests/album-validation.test.ts` | Album name/membership payloads: trimming, blank rejection, the 100-character cap, the derived `nameKey`, the required `visible`/`locked` scope, and bulk `linkIds` lists (trimming, dedupe, the 200-id cap) |
 | `tests/albums-repository.test.ts` | Album create/rename/delete, per-side listing and counting, per-side option lists and membership maps, same name on both sides, cross-side rename, scoped counts + covers + placeholder domain, membership add/remove idempotency (including the `scope-mismatch` refusal and the dormant case), bulk add counts with no orphan rows, and that deleting a link clears its memberships |
 | `tests/albums-lib.test.ts` | Cover-collage slots (`COLLAGE_SLOTS`), album count formatting, detail-page hrefs for both themes, the page → side mapping (`albumScopeForPage`, `isAlbumScope`), and the card's membership preview (limit, album order, deleted ids) |
@@ -626,7 +635,7 @@ src/
     LinkActions.tsx         star / add to album / inline edit / two-step delete
     LinkCard.tsx            cover / title / album names / domain / open button
     LinkCover.tsx           thumbnail or domain placeholder, plus the selection checkbox
-    LinkFilters.tsx         search + domain + favorites, drives the URL
+    LinkFilters.tsx         search + domain + album + favorites, drives the URL
     LinkGrid.tsx            the card grid, its "no matches" state, and multi-select wiring
     LockedDomainsPanel.tsx  list, add, and unlock hidden domains
     LockedHeader.tsx        locked page heading + "Lock now"
@@ -653,7 +662,7 @@ src/
     auth.ts                 x-secret-key verification (userscript API)
     dashboard-api.ts        client-side fetch helper for the dashboard endpoints
     dashboard-auth.ts       dashboard password check + gate decision
-    link-filters.ts         ?q= / ?domain= / ?favorite= / ?tab= / ?aq= normalisation + URL building
+    link-filters.ts         ?q= / ?domain= / ?album= / ?favorite= / ?tab= / ?aq= normalisation + URL building
     link-selection.ts       bulk selection rules: toggle, union, partition, labels, report
     locked-auth.ts          passcode check + locked gate decision
     locked-session.ts       the `lc_locked` token (1 hour)

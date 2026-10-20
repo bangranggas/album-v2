@@ -65,6 +65,7 @@ async function loadLinks(filters: FilterValues): Promise<DashboardData> {
       domain: filters.domain,
       query: filters.query,
       favorite: filters.favorite,
+      albumMembership: filters.album === "" ? undefined : filters.album,
       scope: "visible",
     }),
     listDomains(db, { scope: "visible" }),
@@ -186,7 +187,12 @@ export default async function HomePage({
             The filter bar is always rendered so the lock button stays reachable
             even when every saved link lives in a hidden domain.
           */}
-          <LinkFilters domains={result.data.domains} filters={filters} showLockButton />
+          <LinkFilters
+            domains={result.data.domains}
+            filters={filters}
+            showAlbumFilter
+            showLockButton
+          />
 
           {result.data.total === 0 && !filtering ? (
             <EmptyState />

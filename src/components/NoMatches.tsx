@@ -23,6 +23,11 @@ export function NoMatches({
     [
       filters.query === "" ? null : `the search “${filters.query}”`,
       filters.domain === "" ? null : `the domain ${filters.domain}`,
+      filters.album === "in"
+        ? "links in an album"
+        : filters.album === "none"
+          ? "links not in any album"
+          : null,
       filters.favorite ? "favorites only" : null,
     ].filter((part): part is string => part !== null),
   );
@@ -33,12 +38,12 @@ export function NoMatches({
         No links match your filters
       </h2>
       <p className="mx-auto mt-2 max-w-md text-sm text-slate-600 dark:text-slate-400">
-        Nothing matched {described}. Try a different search term, domain, or turn
-        off the favorites filter.
+        Nothing matched {described}. Try a different search term, domain, or album,
+        or turn off the favorites filter.
       </p>
       <Link
         href={buildLinksHref(
-          { query: "", domain: "", favorite: false },
+          { query: "", domain: "", album: "", favorite: false },
           basePath,
         )}
         className="mt-4 inline-flex items-center justify-center rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300"

@@ -102,7 +102,13 @@ export default async function AlbumPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { id } = await params;
-  const filters = resolveLinkFilters(await searchParams);
+  // Every link on an album page is already inside that album, so the membership
+  // filter has nothing to say here. Dropping the field also stops a shared
+  // `?album=` URL from changing this page's count line.
+  const filters = {
+    ...resolveLinkFilters(await searchParams),
+    album: "" as const,
+  };
   const filtering = hasActiveFilters(filters);
   const result = await loadAlbum(id, filters);
 

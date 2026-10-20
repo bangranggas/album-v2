@@ -91,6 +91,7 @@ async function loadLinks(filters: FilterValues): Promise<LockedData> {
       domain: filters.domain,
       query: filters.query,
       favorite: filters.favorite,
+      albumMembership: filters.album === "" ? undefined : filters.album,
       scope: "locked",
     }),
     listDomains(db, { scope: "locked" }),
@@ -243,7 +244,11 @@ export default async function LockedPage({
             </div>
           ) : (
             <>
-              <LinkFilters domains={result.data.domains} filters={filters} />
+              <LinkFilters
+                domains={result.data.domains}
+                filters={filters}
+                showAlbumFilter
+              />
               <LinkGrid
                 links={result.data.links}
                 filters={filters}

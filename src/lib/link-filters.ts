@@ -4,10 +4,16 @@
  * `""` always means "not filtering", so an absent parameter and an empty one
  * behave identically. `favorite` is the one boolean filter: it selects the
  * starred subset instead of the whole list.
+ *
+ * `album` asks whether a link has been filed into an album on this page's side:
+ * `""` is "all", `"in"` keeps the filed links, and `"none"` keeps the loose ones.
  */
+export type AlbumFilter = "" | "in" | "none";
+
 export interface LinkFilters {
   query: string;
   domain: string;
+  album: AlbumFilter;
   favorite: boolean;
 }
 
@@ -63,6 +69,16 @@ export function resolveAlbumQuery(raw: RawSearchParams): string {
 const AFFIRMATIVE = new Set(["1", "true", "on", "yes"]);
 
 /**
+ * Which album membership the URL asks for. Unknown values fall back to "all"
+ * instead of erroring, matching how every other filter treats bad input.
+ */
+export function resolveAlbumFilter(raw: RawSearchParams): AlbumFilter {
+  const value = firstValue(raw.album).trim().toLowerCase();
+
+  return value === "in" || value === "none" ? value : "";
+}
+
+/**
  * Normalises raw `searchParams` into filters the repository can use directly.
  *
  * The domain is lowercased because that is how it is stored; the query is left
@@ -77,12 +93,18 @@ export function resolveLinkFilters(raw: RawSearchParams): LinkFilters {
       .trim()
       .toLowerCase()
       .slice(0, MAX_DOMAIN_LENGTH),
+    album: resolveAlbumFilter(raw),
     favorite: AFFIRMATIVE.has(firstValue(raw.favorite).trim().toLowerCase()),
   };
 }
 
 export function hasActiveFilters(filters: LinkFilters): boolean {
-  return filters.query !== "" || filters.domain !== "" || filters.favorite;
+  return (
+    filters.query !== "" ||
+    filters.domain !== "" ||
+    filters.album !== "" ||
+    filters.favorite
+  );
 }
 
 /**
@@ -94,6 +116,7 @@ export function buildLinksHref(filters: LinkFilters, basePath = "/"): string {
   const params = new URLSearchParams();
 
   if (filters.domain !== "") params.set("domain", filters.domain);
+  if (filters.album !== "") params.set("album", filters.album);
   if (filters.query !== "") params.set("q", filters.query);
   if (filters.favorite) params.set("favorite", "1");
 

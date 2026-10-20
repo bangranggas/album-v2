@@ -15,7 +15,12 @@ import {
   type LinkFilters,
 } from "@/lib/link-filters";
 
-const NONE: LinkFilters = { query: "", domain: "", favorite: false };
+const NONE: LinkFilters = {
+  query: "",
+  domain: "",
+  album: "",
+  favorite: false,
+};
 
 function searchOf(href: string): URLSearchParams {
   return new URLSearchParams(href.slice(href.indexOf("?") + 1));
@@ -38,6 +43,7 @@ describe("resolveLinkFilters", () => {
     expect(resolveLinkFilters({ q: "  hotel  ", domain: " example.com " })).toEqual({
       query: "hotel",
       domain: "example.com",
+      album: "",
       favorite: false,
     });
   });
@@ -103,6 +109,37 @@ describe("resolveLinkFilters", () => {
       expect(resolveLinkFilters({ favorite: ["1", "0"] }).favorite).toBe(true);
     });
   });
+
+  describe("album membership", () => {
+    it("is All when the parameter is absent", () => {
+      expect(resolveLinkFilters({}).album).toBe("");
+    });
+
+    it.each(["in", "none", "IN", " None "])(
+      "reads %s as a membership filter",
+      (value) => {
+        expect(resolveLinkFilters({ album: value }).album).toBe(
+          value.trim().toLowerCase(),
+        );
+      },
+    );
+
+    it.each(["", "   ", "all", "yes", "maybe", "2"])(
+      "falls back to All for %s",
+      (value) => {
+        expect(resolveLinkFilters({ album: value }).album).toBe("");
+      },
+    );
+
+    it("uses the first value when the parameter repeats", () => {
+      expect(resolveLinkFilters({ album: ["in", "none"] }).album).toBe("in");
+      expect(resolveLinkFilters({ album: ["junk", "none"] }).album).toBe("");
+    });
+
+    it("does not throw on an empty repeated parameter", () => {
+      expect(resolveLinkFilters({ album: [] }).album).toBe("");
+    });
+  });
 });
 
 describe("hasActiveFilters", () => {
@@ -120,6 +157,11 @@ describe("hasActiveFilters", () => {
 
   it("is true when only favorites are selected", () => {
     expect(hasActiveFilters({ ...NONE, favorite: true })).toBe(true);
+  });
+
+  it("is true for each album membership value", () => {
+    expect(hasActiveFilters({ ...NONE, album: "in" })).toBe(true);
+    expect(hasActiveFilters({ ...NONE, album: "none" })).toBe(true);
   });
 });
 
@@ -146,8 +188,34 @@ describe("buildLinksHref", () => {
 
   it("writes the favorites flag last, after the other filters", () => {
     expect(
-      buildLinksHref({ query: "hotel", domain: "example.com", favorite: true }),
+      buildLinksHref({
+        query: "hotel",
+        domain: "example.com",
+        album: "",
+        favorite: true,
+      }),
     ).toBe("/?domain=example.com&q=hotel&favorite=1");
+  });
+
+  it("writes the album filter after the domain", () => {
+    expect(buildLinksHref({ ...NONE, domain: "example.com", album: "in" })).toBe(
+      "/?domain=example.com&album=in",
+    );
+  });
+
+  it("writes the album filter on its own", () => {
+    expect(buildLinksHref({ ...NONE, album: "none" })).toBe("/?album=none");
+  });
+
+  it("writes the full filter set in a stable order", () => {
+    expect(
+      buildLinksHref({
+        query: "hotel",
+        domain: "example.com",
+        album: "in",
+        favorite: true,
+      }),
+    ).toBe("/?domain=example.com&album=in&q=hotel&favorite=1");
   });
 
   it("writes favorites on its own", () => {
@@ -166,6 +234,7 @@ describe("buildLinksHref", () => {
     const filters: LinkFilters = {
       query: "maen di hotel",
       domain: "www.indoav.com",
+      album: "none",
       favorite: true,
     };
 
@@ -276,6 +345,7 @@ describe("buildTabHref", () => {
 
   it("drops the other tab's filters, so switching tabs starts clean", () => {
     expect(buildTabHref("albums")).not.toContain("q=");
+    expect(buildTabHref("albums")).not.toContain("album=");
     expect(buildTabHref("links")).not.toContain("tab=");
   });
 

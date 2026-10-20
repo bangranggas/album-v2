@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   buildLinksHref,
   hasActiveFilters,
+  type AlbumFilter,
   type LinkFilters as FilterValues,
 } from "@/lib/link-filters";
 
@@ -25,16 +26,22 @@ export interface LinkFiltersProps {
   filters: FilterValues;
   /** The light dashboard shows the lock icon; the locked page does not need it. */
   showLockButton?: boolean;
+  /**
+   * The album dropdown only makes sense where links are not already inside one
+   * album: the two Links tabs. An album's own page leaves it off.
+   */
+  showAlbumFilter?: boolean;
 }
 
 export function LinkFilters({
   domains,
   filters,
   showLockButton = false,
+  showAlbumFilter = false,
 }: LinkFiltersProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const { query, domain, favorite } = filters;
+  const { query, domain, album, favorite } = filters;
 
   const [text, setText] = useState(query);
   const [seenQuery, setSeenQuery] = useState(query);
@@ -65,12 +72,12 @@ export function LinkFilters({
     if (trimmed === query) return;
 
     const timer = setTimeout(
-      () => navigate({ query: trimmed, domain, favorite }),
+      () => navigate({ query: trimmed, domain, album, favorite }),
       DEBOUNCE_MS,
     );
 
     return () => clearTimeout(timer);
-  }, [domain, favorite, navigate, query, text]);
+  }, [album, domain, favorite, navigate, query, text]);
 
   // A hand-typed `?domain=` that is not in the list would leave the select blank, so
   // offer it explicitly (without a count) instead of silently showing nothing.
@@ -93,7 +100,7 @@ export function LinkFilters({
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            navigate({ query: text.trim(), domain, favorite });
+            navigate({ query: text.trim(), domain, album, favorite });
           }}
         >
           <input
@@ -118,7 +125,12 @@ export function LinkFilters({
           id="link-domain"
           value={domain}
           onChange={(event) =>
-            navigate({ query: text.trim(), domain: event.target.value, favorite })
+            navigate({
+              query: text.trim(),
+              domain: event.target.value,
+              album,
+              favorite,
+            })
           }
           className={`w-full bg-white sm:w-64 dark:bg-slate-950 ${FIELD}`}
         >
@@ -133,6 +145,34 @@ export function LinkFilters({
         </select>
       </div>
 
+      {showAlbumFilter ? (
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="link-album"
+            className="text-xs font-medium text-slate-600 dark:text-slate-400"
+          >
+            Album
+          </label>
+          <select
+            id="link-album"
+            value={album}
+            onChange={(event) =>
+              navigate({
+                query: text.trim(),
+                domain,
+                album: event.target.value as AlbumFilter,
+                favorite,
+              })
+            }
+            className={`w-full bg-white sm:w-44 dark:bg-slate-950 ${FIELD}`}
+          >
+            <option value="">All</option>
+            <option value="in">In an album</option>
+            <option value="none">Not in an album</option>
+          </select>
+        </div>
+      ) : null}
+
       <div className="flex flex-col gap-1.5">
         <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
           Show
@@ -140,7 +180,9 @@ export function LinkFilters({
         <button
           type="button"
           aria-pressed={favorite}
-          onClick={() => navigate({ query: text.trim(), domain, favorite: !favorite })}
+          onClick={() =>
+            navigate({ query: text.trim(), domain, album, favorite: !favorite })
+          }
           className={`inline-flex items-center gap-2 ${FIELD} font-medium ${
             favorite
               ? "border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-500 dark:bg-amber-950 dark:text-amber-300"
@@ -165,7 +207,9 @@ export function LinkFilters({
       {filtering ? (
         <button
           type="button"
-          onClick={() => navigate({ query: "", domain: "", favorite: false })}
+          onClick={() =>
+            navigate({ query: "", domain: "", album: "", favorite: false })
+          }
           className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
         >
           Clear filters

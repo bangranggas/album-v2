@@ -131,7 +131,12 @@ export default async function LockedAlbumPage({
     redirect(`${BASE_PATH}/unlock?next=${next}`);
   }
 
-  const filters = resolveLinkFilters(await searchParams);
+  // Every link on an album page is already inside that album; dropping the field
+  // also stops a shared `?album=` URL from changing this page's count line.
+  const filters = {
+    ...resolveLinkFilters(await searchParams),
+    album: "" as const,
+  };
   const filtering = hasActiveFilters(filters);
   const result = await loadAlbum(id, filters);
 

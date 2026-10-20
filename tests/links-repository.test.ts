@@ -12,7 +12,7 @@ import {
 } from "@/db/links";
 import { addLinkToAlbum, createAlbum } from "@/db/albums";
 import { lockDomain, unlockDomain } from "@/db/locked-domains";
-import { links } from "@/db/schema";
+import { albumLinks, links } from "@/db/schema";
 import type { LinkInput } from "@/lib/validation";
 import { createTestDatabase, type TestDatabase } from "./helpers/test-db";
 
@@ -1030,5 +1030,207 @@ describe("album filter", () => {
 
     expect(await listLinks(db, { albumId: "nope" })).toEqual([]);
     expect(await countLinks(db, { albumId: "nope" })).toBe(0);
+  });
+});
+
+describe("album membership filter", () => {
+  let testDatabase: TestDatabase | undefined;
+
+  afterEach(async () => {
+    await testDatabase?.cleanup();
+    testDatabase = undefined;
+  });
+
+  /**
+   * Two visible albums, one locked album, and links in every interesting
+   * position: in one album, in two, in none, and — written directly, because the
+   * UI refuses to create it — a visible link whose only album is locked.
+   */
+  async function seedMemberships(db: TestDatabase["db"]): Promise<{
+    anime: string;
+    best: string;
+    hidden: string;
+    one: string;
+  }> {
+    const anime = await createAlbum(db, {
+      name: "Anime",
+      nameKey: "anime",
+      scope: "visible",
+    });
+    const best = await createAlbum(db, {
+      name: "Best",
+      nameKey: "best",
+      scope: "visible",
+    });
+    const hidden = await createAlbum(db, {
+      name: "Hidden",
+      nameKey: "hidden",
+      scope: "locked",
+    });
+    if (!anime.ok || !best.ok || !hidden.ok) throw new Error("setup failed");
+
+    const save = (url: string, title: string) =>
+      upsertLink(db, {
+        url,
+        domain: new URL(url).host,
+        title,
+        thumbnail: null,
+      });
+
+    const one = await save("https://example.com/one", "One");
+    const two = await save("https://example.com/two", "Two");
+    await save("https://example.com/loose", "Loose");
+    const three = await save("https://hidden.example/three", "Three");
+    await save("https://hidden.example/four", "Four");
+    const cross = await save("https://cross.example/five", "Cross");
+
+    await addLinkToAlbum(db, anime.album.id, one.link.id);
+    await addLinkToAlbum(db, anime.album.id, two.link.id);
+    await addLinkToAlbum(db, best.album.id, one.link.id);
+
+    // The album is on the dark side, so the link has to be too before the
+    // repository's own scope check will accept the pair.
+    await lockDomain(db, "hidden.example");
+    await addLinkToAlbum(db, hidden.album.id, three.link.id);
+
+    // The UI rejects this pair (a visible link in a locked album); the repository
+    // must still cope with the data if it ever exists.
+    await db.insert(albumLinks).values({
+      albumId: hidden.album.id,
+      linkId: cross.link.id,
+      createdAt: Date.now(),
+    });
+
+    return {
+      anime: anime.album.id,
+      best: best.album.id,
+      hidden: hidden.album.id,
+      one: one.link.id,
+    };
+  }
+
+  it("keeps only the links filed into an album on this side", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seedMemberships(db);
+
+    const rows = await listLinks(db, { albumMembership: "in" });
+
+    expect(rows.map((row) => row.title).sort()).toEqual(["One", "Two"]);
+  });
+
+  it("returns a link in two albums once", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seedMemberships(db);
+
+    const rows = await listLinks(db, { albumMembership: "in" });
+
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((row) => row.id)).size).toBe(2);
+  });
+
+  it("treats a membership on the other side as no album", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seedMemberships(db);
+
+    const none = await listLinks(db, { albumMembership: "none" });
+
+    expect(none.map((row) => row.title).sort()).toEqual(["Cross", "Loose"]);
+  });
+
+  it("filters the locked side against its own albums", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seedMemberships(db);
+
+    const filed = await listLinks(db, { albumMembership: "in", scope: "locked" });
+    const loose = await listLinks(db, { albumMembership: "none", scope: "locked" });
+
+    expect(filed.map((row) => row.title)).toEqual(["Three"]);
+    expect(loose.map((row) => row.title)).toEqual(["Four"]);
+  });
+
+  it("combines with the album-id filter", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const { anime, best } = await seedMemberships(db);
+
+    const inBest = await listLinks(db, {
+      albumId: best,
+      albumMembership: "in",
+    });
+    const noneInAnime = await listLinks(db, {
+      albumId: anime,
+      albumMembership: "none",
+    });
+
+    expect(inBest.map((row) => row.title)).toEqual(["One"]);
+    expect(noneInAnime).toEqual([]);
+  });
+
+  it("combines with domain, search, and favorites", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const { one } = await seedMemberships(db);
+
+    expect(
+      (await listLinks(db, { albumMembership: "in", domain: "example.com" })).map(
+        (row) => row.title,
+      ).sort(),
+    ).toEqual(["One", "Two"]);
+
+    expect(
+      (await listLinks(db, { albumMembership: "in", query: "tw" })).map(
+        (row) => row.title,
+      ),
+    ).toEqual(["Two"]);
+
+    await updateLink(db, one, { isFavorite: true });
+    expect(
+      (await listLinks(db, { albumMembership: "in", favorite: true })).map(
+        (row) => row.title,
+      ),
+    ).toEqual(["One"]);
+
+    expect(
+      (await listLinks(db, { albumMembership: "none", query: "loose" })).map(
+        (row) => row.title,
+      ),
+    ).toEqual(["Loose"]);
+  });
+
+  it("applies the limit to the membership set", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seedMemberships(db);
+
+    const rows = await listLinks(db, { albumMembership: "in", limit: 1 });
+
+    expect(rows).toHaveLength(1);
+  });
+
+  it("counts both sides' albums when the scope is 'all'", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seedMemberships(db);
+
+    const filed = await listLinks(db, {
+      albumMembership: "in",
+      scope: "all",
+    });
+    const loose = await listLinks(db, {
+      albumMembership: "none",
+      scope: "all",
+    });
+
+    expect(filed.map((row) => row.title).sort()).toEqual([
+      "Cross",
+      "One",
+      "Three",
+      "Two",
+    ]);
+    expect(loose.map((row) => row.title).sort()).toEqual(["Four", "Loose"]);
   });
 });

@@ -16,6 +16,7 @@ import type { LinkInput } from "@/lib/validation";
 import type { Database } from "./client";
 import {
   albumLinks,
+  albums,
   links,
   lockedDomains,
   type Link,
@@ -47,6 +48,12 @@ export interface ScopeOptions {
   scope?: LinkScope;
 }
 
+/**
+ * The two album states the Links tab can ask for: filed into at least one album
+ * on this side, or filed into none. "All" is the absence of the option.
+ */
+export type AlbumMembershipFilter = "in" | "none";
+
 export interface ListLinksOptions extends ScopeOptions {
   limit?: number;
   /** Exact domain match. `""` (or omitted) means "every domain". */
@@ -57,6 +64,8 @@ export interface ListLinksOptions extends ScopeOptions {
   favorite?: boolean;
   /** Only links that belong to this album. Omitted means "no album filter". */
   albumId?: string;
+  /** Keep links that are in at least one album on this side, or in none. */
+  albumMembership?: AlbumMembershipFilter;
 }
 
 /** Options for the count helpers: a scope, and optionally one album. */
@@ -107,6 +116,32 @@ function albumCondition(albumId: string | undefined): SQL | undefined {
   if (albumId === undefined) return undefined;
 
   return sql`${links.id} IN (SELECT ${albumLinks.linkId} FROM ${albumLinks} WHERE ${albumLinks.albumId} = ${albumId})`;
+}
+
+/**
+ * The "is this link filed into an album on this side?" half of a query.
+ *
+ * `EXISTS`, not a join: a link that sits in three albums is still one row. The
+ * album's side is part of the test, so the light page can never count a hidden
+ * album's membership (and the locked page can never count a visible one). With
+ * `scope: "all"` the side is ignored, which only the machine-facing list uses.
+ */
+function albumMembershipCondition(
+  filter: AlbumMembershipFilter | undefined,
+  scope: LinkScope,
+): SQL | undefined {
+  if (filter === undefined) return undefined;
+
+  const scoped = scope === "all" ? sql`` : sql` AND ${albums.scope} = ${scope}`;
+
+  const exists = sql`EXISTS (
+    SELECT 1
+    FROM ${albumLinks}
+    INNER JOIN ${albums} ON ${albums.id} = ${albumLinks.albumId}
+    WHERE ${albumLinks.linkId} = ${links.id}${scoped}
+  )`;
+
+  return filter === "in" ? exists : sql`NOT ${exists}`;
 }
 
 /**
@@ -189,6 +224,14 @@ export async function listLinks(
   const album = albumCondition(options.albumId);
   if (album !== undefined) {
     conditions.push(album);
+  }
+
+  const membership = albumMembershipCondition(
+    options.albumMembership,
+    options.scope ?? "visible",
+  );
+  if (membership !== undefined) {
+    conditions.push(membership);
   }
 
   if (options.domain) {
