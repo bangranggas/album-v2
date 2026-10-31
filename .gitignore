@@ -37,3 +37,7 @@ yarn-error.log*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local tooling secrets (contains a live API key — never commit)
+opencode.json
+opencode.jsonc

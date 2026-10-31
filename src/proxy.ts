@@ -56,7 +56,12 @@ export const config = {
      * clear the session), the login page (it would otherwise be unreachable), and
      * Next.js internals and metadata files. A `matcher` is required, otherwise the
      * proxy also runs for static assets and could block CSS and images.
+     *
+     * The PWA files (`/manifest.webmanifest`, `/sw.js`, `/icons/*`) are ungated on
+     * purpose: the browser fetches them to offer the app as an installable share
+     * target, and it does so before — and without — the session cookie. Gating them
+     * would silently disable the share sheet.
      */
-    "/((?!api|login|logout|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
+    "/((?!api|login|logout|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|manifest.webmanifest|sw.js|icons/).*)",
   ],
 };

@@ -135,6 +135,11 @@ describe("proxy matcher", () => {
     "/favicon.ico",
     "/robots.txt",
     "/sitemap.xml",
+    "/manifest.webmanifest",
+    "/sw.js",
+    "/icons/icon-192.png",
+    "/icons/icon-512.png",
+    "/icons/maskable-512.png",
   ])("leaves %s ungated", (path) => {
     expect(matcher.test(path)).toBe(false);
   });
