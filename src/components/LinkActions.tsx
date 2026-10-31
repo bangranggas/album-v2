@@ -61,6 +61,25 @@ function TrashIcon() {
   );
 }
 
+function ImageIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+      <circle cx="8.5" cy="9.5" r="1.5" />
+      <path d="M20.5 15.5l-4.5-4.5L7 19.5" />
+    </svg>
+  );
+}
+
 const ICON_BUTTON =
   "inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 dark:focus-visible:outline-slate-100";
 
@@ -100,6 +119,7 @@ export function LinkActions({
   const [title, setTitle] = useState(link.title);
   const [url, setUrl] = useState(link.url);
   const [thumbnail, setThumbnail] = useState(link.thumbnail ?? "");
+  const [notice, setNotice] = useState<string | null>(null);
 
   /** A passcode that expired mid-session sends the visitor back to the prompt. */
   function handleFailure(status: number, message: string): void {
@@ -128,6 +148,36 @@ export function LinkActions({
       return;
     }
 
+    router.refresh();
+  }
+
+  /**
+   * Asks the server to fill in this link's thumbnail from the page's `og:image`.
+   *
+   * The lookup happens server-side, so it is not bound by the browser's CORS
+   * rules. A page with no image reports `found: false`, which is shown as a plain
+   * "no cover found" rather than an error.
+   */
+  async function fetchThumbnail(): Promise<void> {
+    if (busy) return;
+
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+
+    const result = await callApi(
+      `/api/dashboard/links/${link.id}/thumbnail`,
+      "POST",
+    );
+
+    setBusy(false);
+
+    if (!result.ok) {
+      handleFailure(result.status, result.message);
+      return;
+    }
+
+    setNotice("Thumbnail updated.");
     router.refresh();
   }
 
@@ -335,8 +385,19 @@ export function LinkActions({
         )}
         <button
           type="button"
+          onClick={fetchThumbnail}
+          disabled={busy}
+          aria-label="Fetch thumbnail"
+          title="Fetch thumbnail from the page"
+          className={ICON_BUTTON}
+        >
+          <ImageIcon />
+        </button>
+        <button
+          type="button"
           onClick={() => {
             setError(null);
+            setNotice(null);
             setMode("editing");
           }}
           aria-label="Edit link"
@@ -368,6 +429,10 @@ export function LinkActions({
         >
           {busy ? "Removing…" : "Remove from this album"}
         </button>
+      )}
+
+      {notice === null ? null : (
+        <p className="text-xs text-slate-600 dark:text-slate-400">{notice}</p>
       )}
 
       {error === null ? null : (

@@ -12,11 +12,7 @@ interface ShareHandlerResult {
 }
 
 interface ServiceWorkerScope {
-  pageThumbnail(html: string, pageUrl: string): string | null;
-  readMetaContent(html: string, keys: string[]): string | null;
-  readAttribute(tag: string, name: string): string | null;
-  resolveImageUrl(raw: string | null, base: string): string | null;
-  fetchPageThumbnail(url: string): Promise<string | null>;
+  readSavedLinkId(payload: unknown): string | null;
   /** Runs the share-target handler with one multipart-like form. */
   handleShare(fields: Record<string, string>): Promise<ShareHandlerResult>;
 }
@@ -24,10 +20,9 @@ interface ServiceWorkerScope {
 /**
  * Loads `sw.js` in an isolated context with the few globals a worker expects.
  *
- * The file is a classic script (not an ES module), so every top-level helper is a
- * property of the vm context — which is how the pure parsing helpers are reached
- * here. `fetch` is injected per test rather than stubbed globally, so the share
- * handler can be driven end to end without a network.
+ * The file is a classic script (not an ES module), so its top-level helpers and the
+ * `fetch` listener become properties of the vm context. `fetch` is injected per
+ * test so the share flow can be driven end to end without a network.
  */
 function loadServiceWorker(fetchImpl: typeof fetch): ServiceWorkerScope {
   const code = readFileSync(SW_PATH, "utf8");
@@ -57,9 +52,7 @@ function loadServiceWorker(fetchImpl: typeof fetch): ServiceWorkerScope {
 
   vm.runInContext(code, context);
 
-  const scope = context as unknown as ServiceWorkerScope & {
-    readSavedLinkId(payload: unknown): string | null;
-  };
+  const scope = context as unknown as ServiceWorkerScope;
 
   scope.handleShare = async (fields: Record<string, string>) => {
     const fetchListener = listeners.get("fetch");
@@ -96,181 +89,27 @@ function loadServiceWorker(fetchImpl: typeof fetch): ServiceWorkerScope {
   return scope;
 }
 
-/** A fetch stand-in that fails the test if the worker actually calls it. */
-const unusedFetch = (() => {
-  throw new Error("fetch should not have been called");
-}) as unknown as typeof fetch;
+describe("service worker readSavedLinkId", () => {
+  const scope = loadServiceWorker((() => {
+    throw new Error("unused");
+  }) as unknown as typeof fetch);
 
-describe("service worker attribute parsing", () => {
-  const scope = loadServiceWorker(unusedFetch);
-
-  it("reads a double-quoted attribute", () => {
-    expect(scope.readAttribute('<meta content="a.jpg">', "content")).toBe(
-      "a.jpg",
-    );
+  it("reads the id out of a save response", () => {
+    expect(scope.readSavedLinkId({ data: { link: { id: "abc" } } })).toBe("abc");
   });
 
-  it("reads a single-quoted attribute", () => {
-    expect(scope.readAttribute("<meta content='a.jpg'>", "content")).toBe(
-      "a.jpg",
-    );
-  });
-
-  it("tolerates whitespace around the equals sign", () => {
-    expect(scope.readAttribute('<meta content = "a.jpg">', "content")).toBe(
-      "a.jpg",
-    );
-  });
-
-  it("returns null when the attribute is absent", () => {
-    expect(scope.readAttribute("<meta>", "content")).toBeNull();
-  });
-});
-
-describe("service worker meta lookup", () => {
-  const scope = loadServiceWorker(unusedFetch);
-
-  it("finds og:image regardless of attribute order", () => {
-    const html = '<meta content="https://cdn.test/a.jpg" property="og:image">';
-
-    expect(scope.readMetaContent(html, ["og:image"])).toBe(
-      "https://cdn.test/a.jpg",
-    );
-  });
-
-  it("matches a name= tag as well as property=", () => {
-    const html = '<meta name="twitter:image" content="https://cdn.test/t.jpg">';
-
-    expect(scope.readMetaContent(html, ["twitter:image"])).toBe(
-      "https://cdn.test/t.jpg",
-    );
-  });
-
-  it("returns the first image among the keys that matches", () => {
-    const html =
-      '<meta property="og:image" content="https://cdn.test/og.jpg">' +
-      '<meta name="twitter:image" content="https://cdn.test/tw.jpg">';
-
-    expect(scope.readMetaContent(html, ["og:image", "twitter:image"])).toBe(
-      "https://cdn.test/og.jpg",
-    );
-  });
-
-  it("returns null when nothing matches", () => {
-    expect(scope.readMetaContent("<meta content='x'>", ["og:image"])).toBeNull();
-  });
-});
-
-describe("service worker thumbnail extraction", () => {
-  const scope = loadServiceWorker(unusedFetch);
-
-  it("returns an absolute og:image", () => {
-    const html =
-      '<meta property="og:image" content="https://cdn.test/og.jpg">';
-
-    expect(scope.pageThumbnail(html, "https://example.com/post")).toBe(
-      "https://cdn.test/og.jpg",
-    );
-  });
-
-  it("resolves a relative image against the page url", () => {
-    const html = '<meta property="og:image" content="/img/og.jpg">';
-
-    expect(scope.pageThumbnail(html, "https://example.com/post")).toBe(
-      "https://example.com/img/og.jpg",
-    );
-  });
-
-  it("falls back to the twitter card", () => {
-    const html =
-      '<meta name="twitter:image" content="https://cdn.test/tw.jpg">';
-
-    expect(scope.pageThumbnail(html, "https://example.com/")).toBe(
-      "https://cdn.test/tw.jpg",
-    );
-  });
-
-  it("returns null for a page with no image metadata", () => {
-    expect(scope.pageThumbnail("<html></html>", "https://example.com/")).toBeNull();
-  });
-
-  it("refuses a data url", () => {
-    const html =
-      '<meta property="og:image" content="data:image/png;base64,AAAA">';
-
-    expect(scope.pageThumbnail(html, "https://example.com/")).toBeNull();
-  });
-});
-
-describe("service worker page fetch", () => {
-  function htmlResponse(html: string, url: string): Response {
-    return {
-      ok: true,
-      url,
-      headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
-      text: async () => html,
-    } as unknown as Response;
-  }
-
-  it("returns the page's og:image", async () => {
-    const fetchImpl = vi.fn(async () =>
-      htmlResponse(
-        '<meta property="og:image" content="https://cdn.test/og.jpg">',
-        "https://example.com/post",
-      ),
-    ) as unknown as typeof fetch;
-    const scope = loadServiceWorker(fetchImpl);
-
-    await expect(
-      scope.fetchPageThumbnail("https://example.com/post"),
-    ).resolves.toBe("https://cdn.test/og.jpg");
-  });
-
-  it("returns null when the fetch rejects (the common CORS case)", async () => {
-    const fetchImpl = vi.fn(async () => {
-      throw new TypeError("Failed to fetch");
-    }) as unknown as typeof fetch;
-    const scope = loadServiceWorker(fetchImpl);
-
-    await expect(
-      scope.fetchPageThumbnail("https://example.com/post"),
-    ).resolves.toBeNull();
-  });
-
-  it("returns null for a non-html response", async () => {
-    const fetchImpl = vi.fn(async () =>
-      ({
-        ok: true,
-        url: "https://example.com/file.pdf",
-        headers: new Headers({ "content-type": "application/pdf" }),
-        text: async () => "",
-      }) as unknown as Response,
-    ) as unknown as typeof fetch;
-    const scope = loadServiceWorker(fetchImpl);
-
-    await expect(
-      scope.fetchPageThumbnail("https://example.com/file.pdf"),
-    ).resolves.toBeNull();
-  });
-
-  it("requests the page without credentials", async () => {
-    const fetchImpl = vi.fn(async () =>
-      htmlResponse("<html></html>", "https://example.com/"),
-    ) as unknown as typeof fetch;
-    const scope = loadServiceWorker(fetchImpl);
-
-    await scope.fetchPageThumbnail("https://example.com/");
-
-    expect(fetchImpl).toHaveBeenCalledWith(
-      "https://example.com/",
-      expect.objectContaining({ credentials: "omit" }),
-    );
+  it("returns null for a malformed payload", () => {
+    expect(scope.readSavedLinkId(null)).toBeNull();
+    expect(scope.readSavedLinkId({})).toBeNull();
+    expect(scope.readSavedLinkId({ data: { link: {} } })).toBeNull();
   });
 });
 
 describe("service worker share handler", () => {
-  it("saves the link, patches its thumbnail, and reports success", async () => {
+  /** A fetch stub that records calls and answers save + thumbnail endpoints. */
+  function recordingFetch(options: { saveOk?: boolean } = {}) {
     const calls: { url: string; method: string; body?: string }[] = [];
+    const saveOk = options.saveOk ?? true;
 
     const fetchImpl = vi.fn(async (input: string, init?: RequestInit) => {
       calls.push({
@@ -281,27 +120,20 @@ describe("service worker share handler", () => {
 
       if (input === "/api/dashboard/links") {
         return {
-          ok: true,
-          status: 200,
+          ok: saveOk,
+          status: saveOk ? 200 : 500,
           json: async () => ({ data: { link: { id: "link-1" } } }),
         } as unknown as Response;
       }
 
-      if (input.startsWith("/api/dashboard/links/link-1")) {
-        return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
-      }
-
-      // The shared page itself.
-      return {
-        ok: true,
-        status: 200,
-        url: "https://example.com/post",
-        headers: new Headers({ "content-type": "text/html" }),
-        text: async () =>
-          '<meta property="og:image" content="https://cdn.test/og.jpg">',
-      } as unknown as Response;
+      return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
     }) as unknown as typeof fetch;
 
+    return { fetchImpl, calls };
+  }
+
+  it("saves the link, asks for a thumbnail, and reports success", async () => {
+    const { fetchImpl, calls } = recordingFetch();
     const scope = loadServiceWorker(fetchImpl);
 
     const result = await scope.handleShare({
@@ -314,12 +146,13 @@ describe("service worker share handler", () => {
     expect(calls[0]).toMatchObject({ url: "/api/dashboard/links", method: "POST" });
     expect(calls[0]?.body).toContain("https://example.com/post");
 
-    const patch = calls.find((call) => call.method === "PATCH");
-    expect(patch).toBeDefined();
-    expect(patch?.body).toContain("https://cdn.test/og.jpg");
+    const thumbnailCall = calls.find((call) => call.url.endsWith("/thumbnail"));
+    expect(thumbnailCall).toBeDefined();
+    expect(thumbnailCall?.method).toBe("POST");
+    expect(thumbnailCall?.url).toBe("/api/dashboard/links/link-1/thumbnail");
   });
 
-  it("still reports success when the thumbnail lookup fails", async () => {
+  it("still reports success when the thumbnail request fails", async () => {
     const fetchImpl = vi.fn(async (input: string) => {
       if (input === "/api/dashboard/links") {
         return {
@@ -328,7 +161,6 @@ describe("service worker share handler", () => {
           json: async () => ({ data: { link: { id: "link-2" } } }),
         } as unknown as Response;
       }
-
       throw new TypeError("Failed to fetch");
     }) as unknown as typeof fetch;
 
@@ -340,6 +172,16 @@ describe("service worker share handler", () => {
     });
 
     expect(result).toEqual({ status: 303, location: "/share-target/result?status=ok" });
+  });
+
+  it("does not ask for a thumbnail when the save failed", async () => {
+    const { fetchImpl, calls } = recordingFetch({ saveOk: false });
+    const scope = loadServiceWorker(fetchImpl);
+
+    const result = await scope.handleShare({ url: "https://example.com/post" });
+
+    expect(result.location).toBe("/share-target/result?status=error");
+    expect(calls.some((call) => call.url.endsWith("/thumbnail"))).toBe(false);
   });
 
   it("redirects to login on a 401 from the save endpoint", async () => {
@@ -357,7 +199,9 @@ describe("service worker share handler", () => {
   });
 
   it("reports an invalid share when no url is present", async () => {
-    const scope = loadServiceWorker(unusedFetch);
+    const scope = loadServiceWorker((() => {
+      throw new Error("fetch should not have been called");
+    }) as unknown as typeof fetch);
 
     const result = await scope.handleShare({ text: "no link here" });
 
@@ -365,24 +209,11 @@ describe("service worker share handler", () => {
   });
 
   it("extracts the url out of a mixed text field", async () => {
-    const saved: string[] = [];
-
-    const fetchImpl = vi.fn(async (input: string, init?: RequestInit) => {
-      if (input === "/api/dashboard/links") {
-        saved.push(String(init?.body));
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ data: { link: { id: "link-3" } } }),
-        } as unknown as Response;
-      }
-      throw new TypeError("no thumbnail");
-    }) as unknown as typeof fetch;
-
+    const { fetchImpl, calls } = recordingFetch();
     const scope = loadServiceWorker(fetchImpl);
 
     await scope.handleShare({ text: "Read this https://example.com/article" });
 
-    expect(saved[0]).toContain("https://example.com/article");
+    expect(calls[0]?.body).toContain("https://example.com/article");
   });
 });
