@@ -88,10 +88,11 @@ async function loadLinks(filters: FilterValues): Promise<LockedData> {
   const [links, domains, lockedDomains, allDomains, total, albums] = await Promise.all([
     listLinks(db, {
       limit: PAGE_LIMIT,
-      domain: filters.domain,
+      domains: filters.domains,
+      albums: filters.albums,
       query: filters.query,
       favorite: filters.favorite,
-      albumMembership: filters.album === "" ? undefined : filters.album,
+      albumMembership: filters.albumNone ? "none" : undefined,
       scope: "locked",
     }),
     listDomains(db, { scope: "locked" }),
@@ -246,6 +247,7 @@ export default async function LockedPage({
             <>
               <LinkFilters
                 domains={result.data.domains}
+                albums={result.data.albums}
                 filters={filters}
                 showAlbumFilter
               />

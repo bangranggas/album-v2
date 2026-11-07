@@ -1234,3 +1234,203 @@ describe("album membership filter", () => {
     expect(loose.map((row) => row.title).sort()).toEqual(["Four", "Loose"]);
   });
 });
+
+describe("listLinks include/exclude selections", () => {
+  let testDatabase: TestDatabase | undefined;
+
+  afterEach(async () => {
+    await testDatabase?.cleanup();
+    testDatabase = undefined;
+  });
+
+  /**
+   * Three visible domains and two visible albums, arranged so every selection
+   * combination has a different, checkable answer. A hidden link in a hidden
+   * album proves the album selection is scope-aware.
+   */
+  async function seed(db: TestDatabase["db"]) {
+    const save = (url: string, title: string) =>
+      upsertLink(db, {
+        url,
+        domain: new URL(url).host,
+        title,
+        thumbnail: null,
+      });
+
+    const alpha = await save("https://alpha.example/one", "Alpha");
+    const beta = await save("https://beta.example/one", "Beta");
+    const gamma = await save("https://gamma.example/one", "Gamma");
+    const hiddenLink = await save("https://hidden.example/one", "Hidden");
+
+    const anime = await createAlbum(db, {
+      name: "Anime",
+      nameKey: "anime",
+      scope: "visible",
+    });
+    const best = await createAlbum(db, {
+      name: "Best",
+      nameKey: "best",
+      scope: "visible",
+    });
+    const secret = await createAlbum(db, {
+      name: "Secret",
+      nameKey: "secret",
+      scope: "locked",
+    });
+    if (!anime.ok || !best.ok || !secret.ok) throw new Error("setup failed");
+
+    await addLinkToAlbum(db, anime.album.id, alpha.link.id);
+    await addLinkToAlbum(db, anime.album.id, beta.link.id);
+    await addLinkToAlbum(db, best.album.id, beta.link.id);
+
+    await lockDomain(db, "hidden.example");
+    await addLinkToAlbum(db, secret.album.id, hiddenLink.link.id);
+
+    return {
+      anime: anime.album.id,
+      best: best.album.id,
+      secret: secret.album.id,
+    };
+  }
+
+  const titles = (rows: readonly { title: string }[]) =>
+    rows.map((row) => row.title).sort();
+
+  it("keeps only the included domains", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+
+    const rows = await listLinks(db, {
+      domains: { include: ["alpha.example", "beta.example"], exclude: [] },
+    });
+
+    expect(titles(rows)).toEqual(["Alpha", "Beta"]);
+  });
+
+  it("drops the excluded domains", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+
+    const rows = await listLinks(db, {
+      domains: { include: [], exclude: ["beta.example"] },
+    });
+
+    expect(titles(rows)).toEqual(["Alpha", "Gamma"]);
+  });
+
+  it("combines domain include and exclude", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+
+    const rows = await listLinks(db, {
+      domains: {
+        include: ["alpha.example", "beta.example"],
+        exclude: ["beta.example"],
+      },
+    });
+
+    expect(titles(rows)).toEqual(["Alpha"]);
+  });
+
+  it("treats an empty domain selection as no filter", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+
+    const rows = await listLinks(db, {
+      domains: { include: [], exclude: [] },
+    });
+
+    expect(titles(rows)).toEqual(["Alpha", "Beta", "Gamma"]);
+  });
+
+  it("keeps links in any included album, once each", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const { anime, best } = await seed(db);
+
+    const rows = await listLinks(db, {
+      albums: { include: [anime, best], exclude: [] },
+    });
+
+    expect(rows).toHaveLength(2);
+    expect(titles(rows)).toEqual(["Alpha", "Beta"]);
+  });
+
+  it("drops links in an excluded album", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const { best } = await seed(db);
+
+    const rows = await listLinks(db, {
+      albums: { include: [], exclude: [best] },
+    });
+
+    expect(titles(rows)).toEqual(["Alpha", "Gamma"]);
+  });
+
+  it("combines album include and exclude", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const { anime, best } = await seed(db);
+
+    const rows = await listLinks(db, {
+      albums: { include: [anime], exclude: [best] },
+    });
+
+    expect(titles(rows)).toEqual(["Alpha"]);
+  });
+
+  it("matches nothing for an unknown album id", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await seed(db);
+
+    const rows = await listLinks(db, {
+      albums: { include: ["does-not-exist"], exclude: [] },
+    });
+
+    expect(rows).toEqual([]);
+  });
+
+  it("never matches an album of the other side", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const { secret } = await seed(db);
+
+    const visible = await listLinks(db, {
+      albums: { include: [secret], exclude: [] },
+    });
+    const locked = await listLinks(db, {
+      albums: { include: [secret], exclude: [] },
+      scope: "locked",
+    });
+
+    expect(visible).toEqual([]);
+    expect(titles(locked)).toEqual(["Hidden"]);
+  });
+
+  it("combines with the search and favorites filters", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const { anime, best } = await seed(db);
+
+    const searched = await listLinks(db, {
+      albums: { include: [anime], exclude: [] },
+      query: "bet",
+    });
+    expect(titles(searched)).toEqual(["Beta"]);
+
+    const alpha = await listLinks(db, { query: "alpha" });
+    await updateLink(db, alpha[0]!.id, { isFavorite: true });
+
+    const favorite = await listLinks(db, {
+      albums: { include: [anime], exclude: [best] },
+      favorite: true,
+    });
+    expect(titles(favorite)).toEqual(["Alpha"]);
+  });
+});

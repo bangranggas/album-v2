@@ -1,4 +1,5 @@
 import { LinkCard } from "@/components/LinkCard";
+import { LinkList } from "@/components/LinkList";
 import { NoMatches } from "@/components/NoMatches";
 import { SelectAllToggle } from "@/components/SelectAllToggle";
 import { SelectionBar } from "@/components/SelectionBar";
@@ -31,6 +32,9 @@ export interface LinkGridProps {
 /**
  * The card grid and its "nothing matched" state, shared by the dashboard and the
  * locked page so the two can never drift apart.
+ *
+ * `filters.view` picks the layout: the card grid or the detailed list. Both live
+ * inside the same selection provider, so bulk selection behaves identically.
  */
 export function LinkGrid({
   links,
@@ -43,29 +47,39 @@ export function LinkGrid({
   selectable = false,
 }: LinkGridProps) {
   if (links.length === 0) {
-    return <NoMatches filters={filters} basePath={basePath} />;
+    return <NoMatches filters={filters} albums={albums} basePath={basePath} />;
   }
 
   const visibleIds = links.map((link) => link.id);
 
-  const grid = (
-    <ul className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-      {links.map((link) => (
-        <li key={link.id}>
-          <LinkCard
-            link={link}
-            locked={locked}
-            albums={albums}
-            memberAlbumIds={memberships?.get(link.id) ?? []}
-            removeFromAlbumId={removeFromAlbumId}
-            basePath={basePath}
-          />
-        </li>
-      ))}
-    </ul>
-  );
+  const body =
+    filters.view === "list" ? (
+      <LinkList
+        links={links}
+        locked={locked}
+        albums={albums}
+        memberships={memberships}
+        removeFromAlbumId={removeFromAlbumId}
+        basePath={basePath}
+      />
+    ) : (
+      <ul className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {links.map((link) => (
+          <li key={link.id}>
+            <LinkCard
+              link={link}
+              locked={locked}
+              albums={albums}
+              memberAlbumIds={memberships?.get(link.id) ?? []}
+              removeFromAlbumId={removeFromAlbumId}
+              basePath={basePath}
+            />
+          </li>
+        ))}
+      </ul>
+    );
 
-  if (!selectable) return grid;
+  if (!selectable) return body;
 
   return (
     <SelectionProvider>
@@ -75,7 +89,7 @@ export function LinkGrid({
         Room for the fixed action bar, so the last row's buttons are never covered
         by it while a selection exists.
       */}
-      <div className="pb-24">{grid}</div>
+      <div className="pb-24">{body}</div>
 
       {/*
         `albums` is undefined on the album pages, where nothing is selectable; the

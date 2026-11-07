@@ -62,10 +62,11 @@ async function loadLinks(filters: FilterValues): Promise<DashboardData> {
   const [links, domains, total, albums] = await Promise.all([
     listLinks(db, {
       limit: PAGE_LIMIT,
-      domain: filters.domain,
+      domains: filters.domains,
+      albums: filters.albums,
       query: filters.query,
       favorite: filters.favorite,
-      albumMembership: filters.album === "" ? undefined : filters.album,
+      albumMembership: filters.albumNone ? "none" : undefined,
       scope: "visible",
     }),
     listDomains(db, { scope: "visible" }),
@@ -189,6 +190,7 @@ export default async function HomePage({
           */}
           <LinkFilters
             domains={result.data.domains}
+            albums={result.data.albums}
             filters={filters}
             showAlbumFilter
             showLockButton

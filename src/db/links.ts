@@ -6,7 +6,9 @@ import {
   count,
   desc,
   eq,
+  inArray,
   ne,
+  notInArray,
   or,
   sql,
   type SQL,
@@ -54,16 +56,32 @@ export interface ScopeOptions {
  */
 export type AlbumMembershipFilter = "in" | "none";
 
+/**
+ * One category's include/exclude selection. Empty lists mean "do not narrow".
+ *
+ * The two lists are mutually exclusive by the time they reach the repository (the
+ * URL resolver enforces that), but the SQL still expresses them independently, so
+ * a caller that passes both gets "in one of these and not in any of those".
+ */
+export interface ValueSelection {
+  include: readonly string[];
+  exclude: readonly string[];
+}
+
 export interface ListLinksOptions extends ScopeOptions {
   limit?: number;
   /** Exact domain match. `""` (or omitted) means "every domain". */
   domain?: string;
+  /** Domain values to keep and to drop. Omitted means "no domain filter". */
+  domains?: ValueSelection;
   /** Case-insensitive substring of the title or the url. `""` means "no search". */
   query?: string;
   /** `true` keeps only starred links; `false` (the default) applies no filter. */
   favorite?: boolean;
   /** Only links that belong to this album. Omitted means "no album filter". */
   albumId?: string;
+  /** Album ids to keep and to drop. Omitted means "no album filter". */
+  albums?: ValueSelection;
   /** Keep links that are in at least one album on this side, or in none. */
   albumMembership?: AlbumMembershipFilter;
 }
@@ -142,6 +160,68 @@ function albumMembershipCondition(
   )`;
 
   return filter === "in" ? exists : sql`NOT ${exists}`;
+}
+
+/**
+ * The "which of these domains?" half of a query: `IN` for the include list and
+ * `NOT IN` for the exclude list. `links.domain` is `NOT NULL`, so `NOT IN` cannot
+ * be tripped up by a NULL the way a nullable column would.
+ */
+function domainSelectionCondition(
+  selection: ValueSelection | undefined,
+): SQL | undefined {
+  if (selection === undefined) return undefined;
+
+  const conditions: SQL[] = [];
+
+  if (selection.include.length > 0) {
+    conditions.push(inArray(links.domain, [...selection.include]));
+  }
+  if (selection.exclude.length > 0) {
+    conditions.push(notInArray(links.domain, [...selection.exclude]));
+  }
+
+  return conditions.length === 0 ? undefined : and(...conditions);
+}
+
+/**
+ * The "which albums?" half of a query, for a category that can include and
+ * exclude several albums at once.
+ *
+ * One `EXISTS` per list, never a join: a link that sits in three albums is still
+ * one row. The album's side is part of the test, so a light page cannot be
+ * narrowed by a hidden album's membership even if the URL names its id.
+ */
+function albumSelectionCondition(
+  selection: ValueSelection | undefined,
+  scope: LinkScope,
+): SQL | undefined {
+  if (selection === undefined) return undefined;
+
+  const include = [...selection.include];
+  const exclude = [...selection.exclude];
+  if (include.length === 0 && exclude.length === 0) return undefined;
+
+  const scoped = scope === "all" ? sql`` : sql` AND ${albums.scope} = ${scope}`;
+
+  const exists = (ids: readonly string[]) => sql`EXISTS (
+    SELECT 1
+    FROM ${albumLinks}
+    INNER JOIN ${albums} ON ${albums.id} = ${albumLinks.albumId}
+    WHERE ${albumLinks.linkId} = ${links.id}${scoped}
+      AND ${inArray(albumLinks.albumId, [...ids])}
+  )`;
+
+  const conditions: SQL[] = [];
+
+  if (include.length > 0) {
+    conditions.push(exists(include));
+  }
+  if (exclude.length > 0) {
+    conditions.push(sql`NOT (${exists(exclude)})`);
+  }
+
+  return and(...conditions);
 }
 
 /**
@@ -234,8 +314,21 @@ export async function listLinks(
     conditions.push(membership);
   }
 
+  const albumSelection = albumSelectionCondition(
+    options.albums,
+    options.scope ?? "visible",
+  );
+  if (albumSelection !== undefined) {
+    conditions.push(albumSelection);
+  }
+
   if (options.domain) {
     conditions.push(eq(links.domain, options.domain));
+  }
+
+  const domainSelection = domainSelectionCondition(options.domains);
+  if (domainSelection !== undefined) {
+    conditions.push(domainSelection);
   }
 
   if (options.favorite === true) {

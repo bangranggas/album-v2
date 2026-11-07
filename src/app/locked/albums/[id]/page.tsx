@@ -15,6 +15,7 @@ import {
   formatLinkCount,
   hasActiveFilters,
   resolveLinkFilters,
+  withoutAlbumFilter,
   type LinkFilters as FilterValues,
 } from "@/lib/link-filters";
 import { evaluateLockedGate, type LockedGate } from "@/lib/locked-auth";
@@ -72,7 +73,7 @@ async function loadAlbum(id: string, filters: FilterValues): Promise<AlbumResult
       listLinks(db, {
         limit: PAGE_LIMIT,
         albumId: id,
-        domain: filters.domain,
+        domains: filters.domains,
         query: filters.query,
         favorite: filters.favorite,
         scope: "locked",
@@ -131,12 +132,9 @@ export default async function LockedAlbumPage({
     redirect(`${BASE_PATH}/unlock?next=${next}`);
   }
 
-  // Every link on an album page is already inside that album; dropping the field
-  // also stops a shared `?album=` URL from changing this page's count line.
-  const filters = {
-    ...resolveLinkFilters(await searchParams),
-    album: "" as const,
-  };
+  // Every link on an album page is already inside that album; dropping the album
+  // category also stops a shared `?album=` URL from changing this page's count line.
+  const filters = withoutAlbumFilter(resolveLinkFilters(await searchParams));
   const filtering = hasActiveFilters(filters);
   const result = await loadAlbum(id, filters);
 

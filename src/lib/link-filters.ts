@@ -1,20 +1,31 @@
+import {
+  EMPTY_CATEGORY,
+  hasCategorySelection,
+  type CategorySelection,
+} from "./filter-selection";
+
 /**
  * The dashboard's filter state, as read from and written to the query string.
  *
- * `""` always means "not filtering", so an absent parameter and an empty one
- * behave identically. `favorite` is the one boolean filter: it selects the
- * starred subset instead of the whole list.
+ * Domain and Album are multi-value categories, each with an include and an exclude
+ * list. A value can never appear in both lists; `resolveLinkFilters` enforces that
+ * even for hand-typed URLs. `albumNone` is the Album category's special option:
+ * "Not in an album", which is exclusive with any concrete album selection.
  *
- * `album` asks whether a link has been filed into an album on this page's side:
- * `""` is "all", `"in"` keeps the filed links, and `"none"` keeps the loose ones.
+ * `view` is a display preference rather than a filter: it never makes the "Clear
+ * filters" button appear and is preserved when the filters are cleared.
  */
-export type AlbumFilter = "" | "in" | "none";
+
+export type LinkView = "grid" | "list";
 
 export interface LinkFilters {
   query: string;
-  domain: string;
-  album: AlbumFilter;
+  domains: CategorySelection;
+  albums: CategorySelection;
+  /** True for the Album category's "Not in an album" option. */
+  albumNone: boolean;
   favorite: boolean;
+  view: LinkView;
 }
 
 /** Generous caps that comfortably fit any real title or search term. */
@@ -26,6 +37,15 @@ export const MAX_DOMAIN_LENGTH = 253;
  * database would ever store (`MAX_ALBUM_NAME_LENGTH` mirrors this value).
  */
 export const MAX_ALBUM_QUERY_LENGTH = 100;
+
+/**
+ * A URL can carry many values per category. The cap keeps a hand-edited or
+ * malicious link from turning into an unbounded `IN (…)` list.
+ */
+export const MAX_FILTER_VALUES = 50;
+
+/** Album ids are UUIDs; this is generous enough for any future id format. */
+export const MAX_ALBUM_ID_LENGTH = 100;
 
 /**
  * The two views of the same link list. The tab is part of the URL rather than of
@@ -41,9 +61,23 @@ export type RawSearchParams = Record<
   string | string[] | undefined
 >;
 
+export const EMPTY_FILTERS: LinkFilters = {
+  query: "",
+  domains: EMPTY_CATEGORY,
+  albums: EMPTY_CATEGORY,
+  albumNone: false,
+  favorite: false,
+  view: "grid",
+};
+
 function firstValue(raw: string | string[] | undefined): string {
   if (Array.isArray(raw)) return raw[0] ?? "";
   return raw ?? "";
+}
+
+function allValues(raw: string | string[] | undefined): string[] {
+  if (raw === undefined) return [];
+  return Array.isArray(raw) ? raw : [raw];
 }
 
 /**
@@ -68,14 +102,68 @@ export function resolveAlbumQuery(raw: RawSearchParams): string {
 /** Values that switch a boolean filter on; everything else means off. */
 const AFFIRMATIVE = new Set(["1", "true", "on", "yes"]);
 
-/**
- * Which album membership the URL asks for. Unknown values fall back to "all"
- * instead of erroring, matching how every other filter treats bad input.
- */
-export function resolveAlbumFilter(raw: RawSearchParams): AlbumFilter {
-  const value = firstValue(raw.album).trim().toLowerCase();
+function normaliseDomain(value: string): string {
+  return value.trim().toLowerCase().slice(0, MAX_DOMAIN_LENGTH);
+}
 
-  return value === "in" || value === "none" ? value : "";
+function normaliseAlbumId(value: string): string {
+  return value.trim().slice(0, MAX_ALBUM_ID_LENGTH);
+}
+
+/** `in` and `none` are the old single-value album choices, not album ids. */
+function isLegacyAlbumToken(value: string): boolean {
+  const token = value.trim().toLowerCase();
+
+  return token === "in" || token === "none";
+}
+
+function uniqueValues(
+  values: readonly string[],
+  normalise: (value: string) => string,
+): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const entry of values) {
+    const value = normalise(entry);
+
+    if (value === "" || seen.has(value)) continue;
+
+    seen.add(value);
+    result.push(value);
+
+    if (result.length === MAX_FILTER_VALUES) break;
+  }
+
+  return result;
+}
+
+/**
+ * Reads one category's two lists. A value that appears in both is kept only in
+ * include: the include list is the narrower, more explicit intent, and the UI can
+ * never produce the conflict in the first place.
+ */
+function readSelection(
+  raw: RawSearchParams,
+  includeKey: string,
+  excludeKey: string,
+  normalise: (value: string) => string,
+): CategorySelection {
+  const include = uniqueValues(allValues(raw[includeKey]), normalise);
+  const excluded = new Set(include);
+  const exclude = uniqueValues(allValues(raw[excludeKey]), normalise).filter(
+    (value) => !excluded.has(value),
+  );
+
+  return { include, exclude };
+}
+
+/**
+ * Which view the URL asks for. Anything other than the explicit `list` spelling
+ * falls back to the grid, matching how every other filter treats bad input.
+ */
+export function resolveView(raw: RawSearchParams): LinkView {
+  return firstValue(raw.view).trim().toLowerCase() === "list" ? "list" : "grid";
 }
 
 /**
@@ -85,26 +173,68 @@ export function resolveAlbumFilter(raw: RawSearchParams): AlbumFilter {
  * as typed, because matching is case-insensitive on the database side. Over-long
  * values are truncated rather than dropped, so a paste cannot silently disable
  * the filter.
+ *
+ * Legacy links are honoured: a single `?domain=` is an include, `?album=none`
+ * becomes `albumNone`, and `?album=in` simply applies no album filter (the new UI
+ * has no "in any album" choice, and treating it as "nothing" is the safe reading).
  */
 export function resolveLinkFilters(raw: RawSearchParams): LinkFilters {
+  const albumValues = allValues(raw.album);
+  const legacyNone = albumValues.some(
+    (value) => value.trim().toLowerCase() === "none",
+  );
+  const albumNone =
+    legacyNone || AFFIRMATIVE.has(firstValue(raw.albumNone).trim().toLowerCase());
+
+  const albums = albumNone
+    ? { include: [], exclude: [] }
+    : readSelection(
+        {
+          ...raw,
+          album: albumValues.filter((value) => !isLegacyAlbumToken(value)),
+        },
+        "album",
+        "albumExclude",
+        normaliseAlbumId,
+      );
+
   return {
     query: firstValue(raw.q).trim().slice(0, MAX_QUERY_LENGTH),
-    domain: firstValue(raw.domain)
-      .trim()
-      .toLowerCase()
-      .slice(0, MAX_DOMAIN_LENGTH),
-    album: resolveAlbumFilter(raw),
+    domains: readSelection(
+      raw,
+      "domain",
+      "domainExclude",
+      normaliseDomain,
+    ),
+    albums,
+    albumNone,
     favorite: AFFIRMATIVE.has(firstValue(raw.favorite).trim().toLowerCase()),
+    view: resolveView(raw),
   };
 }
 
 export function hasActiveFilters(filters: LinkFilters): boolean {
   return (
     filters.query !== "" ||
-    filters.domain !== "" ||
-    filters.album !== "" ||
+    hasCategorySelection(filters.domains) ||
+    filters.albumNone ||
+    hasCategorySelection(filters.albums) ||
     filters.favorite
   );
+}
+
+/** The same filters with every category cleared, keeping only the view. */
+export function clearLinkFilters(filters: LinkFilters): LinkFilters {
+  return { ...EMPTY_FILTERS, view: filters.view };
+}
+
+/**
+ * The filters for an album's own page: every link there is already inside that
+ * album, so the Album category has nothing meaningful to say and a shared
+ * `?album=` URL must not change the page's count line.
+ */
+export function withoutAlbumFilter(filters: LinkFilters): LinkFilters {
+  return { ...filters, albums: EMPTY_CATEGORY, albumNone: false };
 }
 
 /**
@@ -115,10 +245,23 @@ export function hasActiveFilters(filters: LinkFilters): boolean {
 export function buildLinksHref(filters: LinkFilters, basePath = "/"): string {
   const params = new URLSearchParams();
 
-  if (filters.domain !== "") params.set("domain", filters.domain);
-  if (filters.album !== "") params.set("album", filters.album);
+  for (const value of filters.domains.include) params.append("domain", value);
+  for (const value of filters.domains.exclude) {
+    params.append("domainExclude", value);
+  }
+
+  if (filters.albumNone) {
+    params.set("albumNone", "1");
+  } else {
+    for (const value of filters.albums.include) params.append("album", value);
+    for (const value of filters.albums.exclude) {
+      params.append("albumExclude", value);
+    }
+  }
+
   if (filters.query !== "") params.set("q", filters.query);
   if (filters.favorite) params.set("favorite", "1");
+  if (filters.view === "list") params.set("view", "list");
 
   const search = params.toString();
 
@@ -166,4 +309,3 @@ export function buildAlbumsHref(query: string, basePath = "/"): string {
 
   return `${basePath}?${params.toString()}`;
 }
-

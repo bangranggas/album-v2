@@ -13,6 +13,7 @@ import {
   formatLinkCount,
   hasActiveFilters,
   resolveLinkFilters,
+  withoutAlbumFilter,
   type LinkFilters as FilterValues,
 } from "@/lib/link-filters";
 import { logEvent } from "@/lib/logger";
@@ -57,7 +58,7 @@ async function loadAlbum(
       listLinks(db, {
         limit: PAGE_LIMIT,
         albumId: id,
-        domain: filters.domain,
+        domains: filters.domains,
         query: filters.query,
         favorite: filters.favorite,
         scope: "visible",
@@ -103,12 +104,9 @@ export default async function AlbumPage({
 }) {
   const { id } = await params;
   // Every link on an album page is already inside that album, so the membership
-  // filter has nothing to say here. Dropping the field also stops a shared
-  // `?album=` URL from changing this page's count line.
-  const filters = {
-    ...resolveLinkFilters(await searchParams),
-    album: "" as const,
-  };
+  // and album-category filters have nothing to say here. Dropping them also stops
+  // a shared `?album=` URL from changing this page's count line.
+  const filters = withoutAlbumFilter(resolveLinkFilters(await searchParams));
   const filtering = hasActiveFilters(filters);
   const result = await loadAlbum(id, filters);
 

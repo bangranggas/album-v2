@@ -26,8 +26,9 @@ link management in [`docs/locked-domains-and-link-management/`](docs/locked-doma
 albums in [`docs/albums/`](docs/albums), bulk album filing in
 [`docs/bulk-album-assign/`](docs/bulk-album-assign), per-page albums in
 [`docs/album-scope/`](docs/album-scope), the card's cover/membership affordances in
-[`docs/link-card-affordances/`](docs/link-card-affordances), and the album-membership filter in
-[`docs/album-membership-filter/`](docs/album-membership-filter).
+[`docs/link-card-affordances/`](docs/link-card-affordances), the album-membership filter in
+[`docs/album-membership-filter/`](docs/album-membership-filter), and the list view plus
+multi-category filter modal in [`docs/link-list-and-multi-filter/`](docs/link-list-and-multi-filter).
 
 ---
 
@@ -113,6 +114,23 @@ npm.cmd run dev
 Open `http://localhost:4200`. You are redirected to the login page at `/login`, which asks
 for a single password — enter the value of `DASHBOARD_PASSWORD`. There is no username
 field and no browser popup. The session is kept in a signed, `HttpOnly` cookie for 7 days.
+
+Want something to look at first? Seed a demo dataset:
+
+```bash
+npm.cmd run db:seed
+```
+
+It adds 23 dummy links across ten domains, six albums (one per side, plus an intentionally
+empty `Later`), memberships that cover zero, one, and two albums, and two locked domains so
+`/locked` has content. Rows carry fixed `seed-…` ids and URLs, so the command is
+idempotent — run it twice and nothing is added twice.
+
+```bash
+npm.cmd run db:seed:reset      # remove only the seeded rows
+npm.cmd run db:seed -- --dry-run
+npm.cmd run db:seed -- --db=file:./scratch.db
+```
 
 ### Environment variables
 
@@ -291,32 +309,53 @@ blank, gated pages answer `503` instead of rendering.
 
 ### Filtering and search
 
-The dashboard list can be narrowed by domain, by **album membership**, by favorites, and by
-free text, and the filter state lives in the URL, so a filtered view can be reloaded,
-bookmarked, and shared.
+The dashboard list can be narrowed by domain and album — each with **include** and
+**exclude** lists — by favorites, and by free text. The filter state lives in the
+URL, so a filtered view can be reloaded, bookmarked, and shared.
+
+The filter bar has a **Filter** button that opens a two-pane modal: categories on
+the left (Domain, Album), and a searchable Include/Exclude selector on the right.
+Every option starts **checked on the Include side** — a fresh modal filters
+nothing. Unchecking an option moves it to the Exclude side (unchecked); checking
+it in Exclude moves it back to Include. Checked = include, unchecked = exclude, so
+a value can never be on both sides at once. The Album category lists every album
+on the current side by name (with its link count), plus a pinned **Not in an
+album** option. The bar also switches between the card **Grid** and the detailed
+table **List** view, whose rows open their link when clicked.
 
 | Parameter | Meaning |
 | --- | --- |
-| `?domain=` | Exact domain match, e.g. `/?domain=www.indoav.com`. Lowercased before it is matched, so `?domain=Example.COM` works. |
-| `?album=in` / `?album=none` | Only links filed into at least one album on this side, or only links filed into none. Omit the parameter for every link. |
+| `?domainExclude=` | Domain **exclude** — these are the values you uncheck; the rest are included. Repeat for several. The modal persists exclusions rather than the full include list, so a domain added later is included by default. |
+| `?domain=` | Domain include — kept for saved links that spell out a whitelist (e.g. `?domain=a.com`). Lowercased before it is matched, so `?domain=Example.COM` works. |
+| `?albumExclude=` | Album id **exclude** — the unchecked albums; every other album is included. Repeat for several. |
+| `?album=` | Album id include — kept for saved whitelist links. Repeat for several. |
+| `?albumNone=1` | Only links filed into no album on this side. It clears any album include/exclude values. |
 | `?q=` | Case-insensitive substring of the **title** or the **url** (which also covers the domain), e.g. `/?q=hotel`. `%` and `_` are matched literally, not as wildcards. |
 | `?favorite=1` | Only starred links. `1`, `true`, `on`, and `yes` all switch it on; anything else is off. |
+| `?view=list` | The detailed table list instead of cards. Omit it for the grid. The view is a display choice, not a filter: clearing filters keeps it. |
 
-All four can be combined (`/?domain=example.com&album=in&q=hotel&favorite=1`) and all are
-optional; an empty or whitespace-only value means "no filter". Over-long values are truncated
-(200 characters for the search, 253 for the domain) rather than ignored.
+Everything can be combined
+(`/?domainExclude=b.com&albumExclude=<id>&q=hotel&favorite=1&view=list`) and all of
+it is optional; an empty or whitespace-only value means "no filter". Over-long
+values are truncated (200 characters for the search, 253 for the domain, 50
+values per list) rather than ignored. A value that appears in both lists is kept
+only in include.
 
-The album filter is **side-scoped**: `/` counts memberships in visible albums only, and
-`/locked` counts the locked ones, so a hidden album's name, count, and cover never reach the
-light page. A link that sits in several albums still appears once. Album detail pages do not
-offer the control (every link there is already inside that album) and ignore the parameter if
-a shared URL carries one.
+Old links keep working: `?album=none` is read as `albumNone=1`, and `?album=in`
+simply applies no album filter (the new UI has no "in any album" choice).
 
-Filtering and the 100-row cap are one query, so the limit applies to the **filtered** result:
-narrowing the view never hides a match behind the cap. The dropdown is always built from
-every domain in scope, so an active filter cannot hide the domain you want to switch to, and
-each option carries its link count. The count line reads `4 links` unfiltered and
-`2 of 5 links` while filtering.
+The album filters are **side-scoped**: `/` counts memberships in visible albums
+only, and `/locked` counts the locked ones, so a hidden album's name, count, and
+cover never reach the light page. A link that sits in several albums still appears
+once. Album detail pages hide the Album category (every link there is already
+inside that album) and ignore those parameters if a shared URL carries them.
+
+Filtering and the 100-row cap are one query, so the limit applies to the **filtered**
+result: narrowing the view never hides a match behind the cap. The modal's Domain
+list is always built from every domain in scope, so an active filter cannot hide
+the domain you want to switch to, and each option carries its link count. The count
+line reads `4 links` unfiltered and `2 of 5 links` while filtering.
+
 
 Domains are not parsed out of the URL on every read: `links.domain` is a real column,
 derived once during validation and stored. A re-save rewrites it, so a link saved before the
@@ -327,7 +366,8 @@ column existed repairs itself the next time it is saved.
 Every card has three controls: a star (favorite), a pencil (edit), and a trash can (delete).
 
 - **Favorites** toggle in place. A starred card shows a badge over its thumbnail, and the
-  `Favorites` button in the filter bar narrows the grid to starred links.
+  `Favorites` button in the filter bar narrows the list to starred links. The `Grid`/`List`
+  switch changes only the layout.
 - **Edit** opens an inline form for the title, URL, and thumbnail. Changing the URL
   recomputes the domain, so a link can move between domains — including into or out of the
   hidden set. A URL that another link already uses is refused (`409`) and nothing changes.
@@ -359,8 +399,8 @@ the original link, and the same link can sit in several albums.
   is created on the side it belongs to. Album names are unique *per side*, so `Anime` may exist
   once on each, and a duplicate on the same side is refused with `409`.
 - **The album page** (`/albums/<id>`, or `/locked/albums/<id>` in the hidden area) shows the
-  album's links in the usual grid, with the full filter set — search, domain, favorites —
-  applied *inside* the album. Its count line reads `N of M links`.
+  album's links in the usual grid or list, with the search, domain include/exclude, and
+  favorites filters applied *inside* the album. Its count line reads `N of M links`.
 - **Adding a link to albums** happens from the card: the folder button opens a small panel
   listing the page's albums as checkboxes (ticked = already in it). Checking adds, unchecking
   removes, and `+ New album…` creates one on this page and files the link into it in the same
@@ -406,7 +446,8 @@ right of the filter bar on `/`; without a passcode cookie you land on `/locked/u
 asks for `LOCKED_PASSCODE`.
 
 - The page lists **only** links whose domain is locked, with the same filter bar (including
-  the album-membership dropdown), favorites filter, card actions, and manual add form as `/`.
+  the multi-category filter modal), favorites filter, grid/list view, card actions, and manual
+  add form as `/`.
 - The **Locked domains** panel lists every hidden domain with its link count, and can add or
   remove one. Locking applies to the domain, so links saved to it later are hidden too.
 - Access lasts **one hour**; `Lock now` ends it immediately. The cookie (`lc_locked`) is
@@ -485,8 +526,11 @@ applied, so no cloud credentials and no cleanup are required.
 | `tests/proxy.test.ts` | Redirect vs. allow vs. `503`, `?next=` handling, matcher exclusions |
 | `tests/redirect.test.ts` | `?next=` sanitising (open-redirect protection), including the blocked prefixes |
 | `tests/logger.test.ts` | Event shape, domain/IP extraction, serialization safety |
-| `tests/link-filters.test.ts` | `?q=` / `?domain=` / `?album=` / `?favorite=` normalisation, tab (`?tab=`) and album-search (`?aq=`) resolution, URL building (including parameter order), count formatting |
-| `tests/links-repository.test.ts` | Insert vs update, upsert idempotency, concurrent saves, ordering, scope (visible vs. locked), domain filter, favorite filter, album filter, album-membership filter (in/none, both sides, no duplicate rows), search (incl. escaped `%`/`_`), domain list, counts |
+| `tests/link-filters.test.ts` | The filter URL contract: repeated domain/album include and exclude values, mutual exclusion, `?albumNone=`, legacy `?album=in`/`none`, `?view=list`, caps, URL building (including parameter order), clearing while keeping the view, count formatting |
+| `tests/filter-selection.test.ts` | The modal's pure include/exclude rules: toggling, moving between columns, select-all, exclusive special options, completeness, and counting |
+| `tests/multi-category-filter-modal.test.ts` | Modal markup: labelled dialog, category navigation, split Include/Exclude view, search placeholder, special option state, and footer actions |
+| `tests/seed-dummy.test.ts` | The demo dataset's invariants: unique ids/urls, memberships point at real albums, locked links stay on the locked side, and the fixture still covers loose links, multi-album links, an empty album, and favorites |
+| `tests/links-repository.test.ts` | Insert vs update, upsert idempotency, concurrent saves, ordering, scope (visible vs. locked), domain include/exclude, album include/exclude (side-aware, no duplicate rows), favorite filter, album-membership filter (in/none, both sides), search (incl. escaped `%`/`_`), domain list, counts |
 | `tests/album-validation.test.ts` | Album name/membership payloads: trimming, blank rejection, the 100-character cap, the derived `nameKey`, the required `visible`/`locked` scope, and bulk `linkIds` lists (trimming, dedupe, the 200-id cap) |
 | `tests/albums-repository.test.ts` | Album create/rename/delete, per-side listing and counting, per-side option lists and membership maps, same name on both sides, cross-side rename, scoped counts + covers + placeholder domain, membership add/remove idempotency (including the `scope-mismatch` refusal and the dormant case), bulk add counts with no orphan rows, and that deleting a link clears its memberships |
 | `tests/albums-lib.test.ts` | Cover-collage slots (`COLLAGE_SLOTS`), album count formatting, detail-page hrefs for both themes, the page → side mapping (`albumScopeForPage`, `isAlbumScope`), and the card's membership preview (limit, album order, deleted ids) |
@@ -516,6 +560,7 @@ applied, so no cloud credentials and no cleanup are required.
 | `npm run db:generate` | Generate a new SQL migration from `src/db/schema.ts` |
 | `npm run db:migrate` | Apply the migrations in `drizzle/` in order (data backfills included) |
 | `npm run db:push` | Apply the schema to the database in `.env.local` |
+| `npm run db:seed` | Insert the dummy dataset (idempotent; `--reset` removes it) |
 | `npm run db:studio` | Drizzle Studio |
 
 ---

@@ -1,0 +1,220 @@
+{
+  "albums": [
+    { "id": "seed-album-anime", "name": "Anime", "scope": "visible" },
+    { "id": "seed-album-work", "name": "Work", "scope": "visible" },
+    { "id": "seed-album-inspiration", "name": "Inspiration", "scope": "visible" },
+    { "id": "seed-album-reading", "name": "Reading List", "scope": "visible" },
+    { "id": "seed-album-later", "name": "Later", "scope": "visible" },
+    { "id": "seed-album-private", "name": "Private", "scope": "locked" }
+  ],
+  "lockedDomains": ["private.example.com", "secret.internal"],
+  "links": [
+    {
+      "id": "seed-link-media-1",
+      "url": "https://media.example.com/watch/anime-opening",
+      "title": "Anime Opening Compilation 2026",
+      "thumbnail": "https://picsum.photos/seed/anime-op/640/360",
+      "favorite": true,
+      "daysAgo": 1,
+      "albumIds": ["seed-album-anime"]
+    },
+    {
+      "id": "seed-link-media-2",
+      "url": "https://media.example.com/watch/lofi-beats",
+      "title": "Lofi Beats to Code To",
+      "thumbnail": "https://picsum.photos/seed/lofi/640/360",
+      "favorite": false,
+      "daysAgo": 2,
+      "albumIds": ["seed-album-anime"]
+    },
+    {
+      "id": "seed-link-media-3",
+      "url": "https://media.example.com/watch/design-systems",
+      "title": "Design Systems Talk — Into the Details",
+      "thumbnail": null,
+      "favorite": false,
+      "daysAgo": 12,
+      "albumIds": ["seed-album-inspiration"]
+    },
+    {
+      "id": "seed-link-code-1",
+      "url": "https://code.example.com/vercel/next.js",
+      "title": "vercel/next.js — The React Framework",
+      "thumbnail": "https://picsum.photos/seed/nextjs/640/360",
+      "favorite": true,
+      "daysAgo": 3,
+      "albumIds": ["seed-album-work"]
+    },
+    {
+      "id": "seed-link-code-2",
+      "url": "https://code.example.com/drizzle-team/drizzle-orm",
+      "title": "drizzle-team/drizzle-orm — TypeScript ORM",
+      "thumbnail": "https://picsum.photos/seed/drizzle/640/360",
+      "favorite": false,
+      "daysAgo": 4,
+      "albumIds": ["seed-album-work"]
+    },
+    {
+      "id": "seed-link-code-3",
+      "url": "https://code.example.com/tursodatabase/libsql",
+      "title": "tursodatabase/libsql — SQLite for the Edge",
+      "thumbnail": null,
+      "favorite": false,
+      "daysAgo": 5,
+      "albumIds": []
+    },
+    {
+      "id": "seed-link-blog-1",
+      "url": "https://blog.example.com/clean-architecture-in-practice",
+      "title": "Clean Architecture in Practice",
+      "thumbnail": "https://picsum.photos/seed/clean-arch/640/360",
+      "favorite": false,
+      "daysAgo": 7,
+      "albumIds": ["seed-album-inspiration"]
+    },
+    {
+      "id": "seed-link-blog-2",
+      "url": "https://blog.example.com/sqlite-in-production",
+      "title": "Running SQLite in Production",
+      "thumbnail": "https://picsum.photos/seed/sqlite/640/360",
+      "favorite": true,
+      "daysAgo": 8,
+      "albumIds": ["seed-album-reading"]
+    },
+    {
+      "id": "seed-link-news-1",
+      "url": "https://news.example.com/item/1",
+      "title": "Show HN: A Link Collector for Busy People",
+      "thumbnail": null,
+      "favorite": true,
+      "daysAgo": 9,
+      "albumIds": ["seed-album-reading"]
+    },
+    {
+      "id": "seed-link-news-2",
+      "url": "https://news.example.com/item/2",
+      "title": "Ask HN: How do you organise bookmarks?",
+      "thumbnail": null,
+      "favorite": false,
+      "daysAgo": 10,
+      "albumIds": ["seed-album-reading"]
+    },
+    {
+      "id": "seed-link-design-1",
+      "url": "https://design.example.com/shots/dashboard",
+      "title": "Dashboard UI Concept",
+      "thumbnail": "https://picsum.photos/seed/dashboard/640/360",
+      "favorite": true,
+      "daysAgo": 11,
+      "albumIds": ["seed-album-inspiration"]
+    },
+    {
+      "id": "seed-link-design-2",
+      "url": "https://design.example.com/shots/cards",
+      "title": "Card Grid Explorations",
+      "thumbnail": "https://picsum.photos/seed/cards/640/360",
+      "favorite": false,
+      "daysAgo": 13,
+      "albumIds": ["seed-album-inspiration"]
+    },
+    {
+      "id": "seed-link-design-3",
+      "url": "https://design.example.com/file/design-system",
+      "title": "Design System — Components File",
+      "thumbnail": null,
+      "favorite": false,
+      "daysAgo": 14,
+      "albumIds": ["seed-album-work"]
+    },
+    {
+      "id": "seed-link-docs-1",
+      "url": "https://docs.example.com/docs/overview",
+      "title": "Drizzle Docs — Overview",
+      "thumbnail": null,
+      "favorite": false,
+      "daysAgo": 15,
+      "albumIds": ["seed-album-work"]
+    },
+    {
+      "id": "seed-link-docs-2",
+      "url": "https://docs.example.com/docs/select",
+      "title": "Drizzle Docs — Select Queries",
+      "thumbnail": null,
+      "favorite": false,
+      "daysAgo": 16,
+      "albumIds": ["seed-album-work"]
+    },
+    {
+      "id": "seed-link-learn-1",
+      "url": "https://learn.example.com/course/web-dev",
+      "title": "Web Development Course Page",
+      "thumbnail": null,
+      "favorite": false,
+      "daysAgo": 18,
+      "albumIds": []
+    },
+    {
+      "id": "seed-link-community-1",
+      "url": "https://community.example.com/r/webdev/thread",
+      "title": "r/webdev — Side Project Thread",
+      "thumbnail": "https://picsum.photos/seed/community/640/360",
+      "favorite": false,
+      "daysAgo": 19,
+      "albumIds": ["seed-album-anime", "seed-album-inspiration"]
+    },
+    {
+      "id": "seed-link-notes-1",
+      "url": "https://notes.example.com/reading-list",
+      "title": "Reading List Notes",
+      "thumbnail": null,
+      "favorite": false,
+      "daysAgo": 20,
+      "albumIds": ["seed-album-reading"]
+    },
+    {
+      "id": "seed-link-archive-1",
+      "url": "https://archive.example.com/2026/roundup",
+      "title": "2026 Link Roundup",
+      "thumbnail": "https://picsum.photos/seed/roundup/640/360",
+      "favorite": false,
+      "daysAgo": 23,
+      "albumIds": []
+    },
+    {
+      "id": "seed-link-private-1",
+      "url": "https://private.example.com/notes/seed",
+      "title": "Private Notes",
+      "thumbnail": null,
+      "favorite": false,
+      "daysAgo": 6,
+      "albumIds": ["seed-album-private"]
+    },
+    {
+      "id": "seed-link-private-2",
+      "url": "https://private.example.com/finance/seed",
+      "title": "Finance Tracker",
+      "thumbnail": null,
+      "favorite": true,
+      "daysAgo": 21,
+      "albumIds": ["seed-album-private"]
+    },
+    {
+      "id": "seed-link-secret-1",
+      "url": "https://secret.internal/keys/seed",
+      "title": "Internal Keys Rotation",
+      "thumbnail": null,
+      "favorite": false,
+      "daysAgo": 22,
+      "albumIds": ["seed-album-private"]
+    },
+    {
+      "id": "seed-link-secret-2",
+      "url": "https://secret.internal/archive/seed",
+      "title": "Archive Index",
+      "thumbnail": null,
+      "favorite": false,
+      "daysAgo": 24,
+      "albumIds": ["seed-album-private"]
+    }
+  ]
+}
