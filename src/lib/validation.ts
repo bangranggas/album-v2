@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import type { AgentLinkInput } from "@/db/links";
+
 import { isAlbumScope, type AlbumScope } from "./albums";
 
 export const MAX_URL_LENGTH = 2048;
@@ -218,6 +220,61 @@ const manualLinkInputSchema = z
       domain: parseHttpUrl(value.url)?.host ?? "",
     }),
   );
+
+/**
+ * What the agent may send to add a link. Only `url` is required, and every other
+ * field is left `undefined` when omitted so the repository can tell "not sent"
+ * from "clear it": a blank title counts as not sent, a blank thumbnail or summary
+ * clears the stored value.
+ */
+const agentLinkInputSchema = z
+  .object({
+    url: urlField,
+    title: z
+      .string()
+      .trim()
+      .max(MAX_TITLE_LENGTH, `must be at most ${MAX_TITLE_LENGTH} characters`)
+      .optional(),
+    thumbnail: z.union([z.string(), z.null()]).optional(),
+    summary: summaryField.optional(),
+  })
+  .superRefine((value, ctx) => {
+    const thumbnail = normalizeThumbnail(value.thumbnail);
+    if (thumbnail === null) return;
+
+    if (thumbnail.length > MAX_URL_LENGTH || !isHttpUrl(thumbnail)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["thumbnail"],
+        message: "must be an absolute http(s) URL, or empty",
+      });
+    }
+  })
+  .transform((value): AgentLinkInput => {
+    const input: AgentLinkInput = {
+      url: value.url,
+      domain: parseHttpUrl(value.url)?.host ?? "",
+    };
+
+    if (value.title !== undefined && value.title !== "") input.title = value.title;
+    if (value.thumbnail !== undefined) input.thumbnail = normalizeThumbnail(value.thumbnail);
+    if (value.summary !== undefined) input.summary = value.summary;
+
+    return input;
+  });
+
+export function parseAgentLinkInput(raw: unknown): ParseResult<AgentLinkInput> {
+  if (!isPlainObject(raw)) {
+    return { ok: false, message: "payload: must be a JSON object" };
+  }
+
+  const result = agentLinkInputSchema.safeParse(raw);
+  if (!result.success) {
+    return { ok: false, message: describeIssue(result.error) };
+  }
+
+  return { ok: true, data: result.data };
+}
 
 export function parseManualLinkInput(raw: unknown): ParseResult<LinkInput> {
   if (!isPlainObject(raw)) {
