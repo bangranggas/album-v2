@@ -7,7 +7,9 @@ export type ApiErrorCode =
   | "NOT_FOUND"
   | "CONFLICT"
   | "INTERNAL_ERROR"
-  | "UNCONFIGURED";
+  | "UNCONFIGURED"
+  | "PASSCODE_REQUIRED"
+  | "CONFIRMATION_REQUIRED";
 
 export interface ApiErrorBody {
   ok: false;
