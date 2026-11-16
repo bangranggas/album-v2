@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_DOMAIN_LENGTH,
   MAX_SUMMARY_LENGTH,
+  MAX_SUMMARY_WORDS,
+  countWords,
   MAX_TITLE_LENGTH,
   MAX_URL_LENGTH,
   parseLinkPatch,
@@ -299,5 +301,29 @@ describe("summary field", () => {
 
     expect(typed.ok && typed.data.summary).toBe("note");
     expect(blank.ok && blank.data.summary).toBeNull();
+  });
+});
+
+describe("summary word limit", () => {
+  const words = (count: number) => Array.from({ length: count }, (_, index) => `w${index}`).join(" ");
+
+  it("allows exactly 20 words and rejects 21, naming the limit", () => {
+    expect(MAX_SUMMARY_WORDS).toBe(20);
+    expect(parseLinkPatch({ summary: words(20) }).ok).toBe(true);
+
+    const over = parseLinkPatch({ summary: words(21) });
+    expect(over.ok).toBe(false);
+    expect(!over.ok && over.message).toMatch(/summary: must be at most 20 words/);
+  });
+
+  it("counts words across any whitespace, including newlines and repeated spaces", () => {
+    expect(countWords("  one   two" + String.fromCharCode(10) + "three" + String.fromCharCode(9) + " four ")).toBe(4);
+    expect(countWords("")).toBe(0);
+    expect(countWords("   ")).toBe(0);
+  });
+
+  it("applies to the manual add form and the agent payload too", () => {
+    expect(parseManualLinkInput({ url: "https://example.com/a", summary: words(21) }).ok).toBe(false);
+    expect(parseManualLinkInput({ url: "https://example.com/a", summary: words(20) }).ok).toBe(true);
   });
 });

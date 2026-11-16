@@ -7,6 +7,13 @@ import { isAlbumScope, type AlbumScope } from "./albums";
 export const MAX_URL_LENGTH = 2048;
 export const MAX_TITLE_LENGTH = 512;
 export const MAX_SUMMARY_LENGTH = 500;
+export const MAX_SUMMARY_WORDS = 20;
+
+/** Words are runs of non-whitespace, so newlines and repeated spaces do not inflate the count. */
+export function countWords(value: string): number {
+  const trimmed = value.trim();
+  return trimmed === "" ? 0 : trimmed.split(/\s+/).length;
+}
 export const DEFAULT_LIMIT = 100;
 export const MAX_LIMIT = 200;
 
@@ -104,7 +111,10 @@ const summaryField = z
     z
       .string()
       .trim()
-      .max(MAX_SUMMARY_LENGTH, `must be at most ${MAX_SUMMARY_LENGTH} characters`),
+      .max(MAX_SUMMARY_LENGTH, `must be at most ${MAX_SUMMARY_LENGTH} characters`)
+      .refine((value) => countWords(value) <= MAX_SUMMARY_WORDS, {
+        message: `must be at most ${MAX_SUMMARY_WORDS} words`,
+      }),
     z.null(),
   ])
   .transform((value) => (value === null || value === "" ? null : value));

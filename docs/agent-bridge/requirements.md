@@ -79,7 +79,7 @@ Confirm token: stateless HMAC (key `AGENT_API_KEY`) over `{linkId, expiry}`, val
 bound to that one link. No storage.
 
 ### `summary`
-- New nullable `links.summary` text column, max 500 characters, one additive migration.
+- New nullable `links.summary` text column, **max 20 words** (owner's rule, added after the first cut; a 500-character cap stays as a safety net), one additive migration.
 - Optional everywhere: `POST /api/links`, the userscript and the share target are unchanged.
   `PATCH /api/dashboard/links/:id` and the manual add/edit forms accept it optionally.
 - Dashboard card/list shows it as a muted line when present. `/api/links` output is left as is.

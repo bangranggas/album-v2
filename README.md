@@ -518,7 +518,7 @@ without it answer `404`, exactly like an unknown id; a wrong passcode answers `4
 PASSCODE_REQUIRED` after a one-second delay (`AGENT_FAILURE_DELAY_MS` overrides it). Neither secret is logged.
 The passcode does appear in the chat you type it into, so it is only as private as that chat.
 
-**Summary.** `links.summary` is an optional note (max 500 characters) shown under the title on
+**Summary.** `links.summary` is an optional note (**max 20 words**, with a 500-character safety cap) shown under the title on
 cards and list rows, editable in the add/edit forms, and searched by `q`. The userscript,
 the share target and `/api/links` never send or return it, and a re-save by them keeps the stored one.
 

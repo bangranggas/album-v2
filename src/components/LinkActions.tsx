@@ -6,6 +6,7 @@ import { useState, type FormEvent } from "react";
 import { AddToAlbumMenu } from "@/components/AddToAlbumMenu";
 import type { AlbumOption } from "@/db/albums";
 import type { Link } from "@/db/schema";
+import { SummaryWordCount } from "@/components/SummaryWordCount";
 import { callApi } from "@/lib/dashboard-api";
 import {
   MAX_SUMMARY_LENGTH,
@@ -300,9 +301,10 @@ export function LinkActions({
             onChange={(event) => setSummary(event.target.value)}
             maxLength={MAX_SUMMARY_LENGTH}
             rows={3}
-            placeholder="Optional"
+            placeholder="Optional — max 20 words"
             className={FIELD}
           />
+          <SummaryWordCount value={summary} />
         </label>
 
         {error === null ? null : (

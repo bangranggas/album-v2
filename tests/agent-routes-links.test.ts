@@ -171,6 +171,16 @@ describe("POST /api/agent/links", () => {
     expect(await listLinks(dbState.db, { scope: "locked" })).toHaveLength(1);
   });
 
+  it("answers 400 when the summary is longer than 20 words, and writes nothing", async () => {
+    const tooLong = Array.from({ length: 21 }, (_, index) => `w${index}`).join(" ");
+
+    const response = await add({ url: "https://new.test/a", summary: tooLong });
+
+    expect(response.status).toBe(400);
+    expect((await body(response)).error.message).toMatch(/20 words/);
+    expect(await listLinks(dbState.db)).toHaveLength(0);
+  });
+
   it("answers 400 for an invalid url or invalid JSON", async () => {
     expect((await add({ url: "nope" })).status).toBe(400);
     expect((await add("{not json")).status).toBe(400);

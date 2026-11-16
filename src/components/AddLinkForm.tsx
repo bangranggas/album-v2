@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
+import { SummaryWordCount } from "@/components/SummaryWordCount";
 import { callApi } from "@/lib/dashboard-api";
 import {
   MAX_SUMMARY_LENGTH,
@@ -156,10 +157,11 @@ export function AddLinkForm({ lockedDomains }: AddLinkFormProps) {
             value={summary}
             onChange={(event) => setSummary(event.target.value)}
             rows={2}
-            placeholder="Optional — what this link is about"
+            placeholder="Optional — what this link is about (max 20 words)"
             maxLength={MAX_SUMMARY_LENGTH}
             className={FIELD}
           />
+          <SummaryWordCount value={summary} />
         </label>
       </div>
 

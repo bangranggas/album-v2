@@ -32,7 +32,7 @@ Output is one compact line per item; errors are one `ERROR <code>: <message>` li
    title and URL, wait for an explicit yes, then run `delete ID --confirm TOKEN`. A token
    expires in 5 minutes and stops working if the link is edited. Never confirm on your own.
 4. **Summaries**: write one only from what you actually know about the page (the title, a
-   page you read, or what the owner told you). Keep it to a sentence or two (max 500 chars).
+   page you read, or what the owner told you). **Maximum 20 words** (the server rejects longer ones) — one short sentence.
 5. **Organising links**: `search --no-album --limit 50`, group by topic, propose album names
    to the owner, create with `album-new`, then `file` in batches (up to 200 ids). Check
    `albums` first so you do not create a duplicate.
