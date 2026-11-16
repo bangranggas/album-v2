@@ -149,3 +149,20 @@ describe("AlbumMembershipLabel", () => {
     expect(html).toContain('title="Design"');
   });
 });
+
+describe("LinkSummary", () => {
+  it("shows the summary as a muted line", async () => {
+    const { LinkSummary } = await import("@/components/LinkSummary");
+
+    const html = render(createElement(LinkSummary, { summary: "A short note about the page" }));
+
+    expect(html).toContain("A short note about the page");
+  });
+
+  it("renders nothing when the summary is null or blank", async () => {
+    const { LinkSummary } = await import("@/components/LinkSummary");
+
+    expect(render(createElement(LinkSummary, { summary: null }))).toBe("");
+    expect(render(createElement(LinkSummary, { summary: "   " }))).toBe("");
+  });
+});

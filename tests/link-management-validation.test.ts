@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_DOMAIN_LENGTH,
+  MAX_SUMMARY_LENGTH,
   MAX_TITLE_LENGTH,
   MAX_URL_LENGTH,
   parseLinkPatch,
@@ -257,5 +258,46 @@ describe("parsePasscodeInput", () => {
   it("rejects a payload that is not an object", () => {
     expect(parsePasscodeInput(null).ok).toBe(false);
     expect(parsePasscodeInput([]).ok).toBe(false);
+  });
+});
+
+describe("summary field", () => {
+  it("parseLinkPatch trims a summary", () => {
+    const result = parseLinkPatch({ summary: "  hi " });
+
+    expect(result.ok && result.data).toEqual({ summary: "hi" });
+  });
+
+  it("parseLinkPatch turns a blank summary into null (clears it)", () => {
+    const result = parseLinkPatch({ summary: "   " });
+
+    expect(result.ok && result.data).toEqual({ summary: null });
+  });
+
+  it("parseLinkPatch rejects a summary over 500 characters", () => {
+    const result = parseLinkPatch({ summary: "x".repeat(MAX_SUMMARY_LENGTH + 1) });
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.message).toMatch(/summary/);
+  });
+
+  it("parseLinkPatch accepts exactly 500 characters", () => {
+    const result = parseLinkPatch({ summary: "x".repeat(MAX_SUMMARY_LENGTH) });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("parseManualLinkInput stays valid without a summary and leaves it undefined", () => {
+    const result = parseManualLinkInput({ url: "https://example.com/a" });
+
+    expect(result.ok && result.data.summary).toBeUndefined();
+  });
+
+  it("parseManualLinkInput keeps a typed summary and nulls a blank one", () => {
+    const typed = parseManualLinkInput({ url: "https://example.com/a", summary: " note " });
+    const blank = parseManualLinkInput({ url: "https://example.com/a", summary: "" });
+
+    expect(typed.ok && typed.data.summary).toBe("note");
+    expect(blank.ok && blank.data.summary).toBeNull();
   });
 });

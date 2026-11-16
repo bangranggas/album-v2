@@ -1,6 +1,7 @@
 import { AlbumMembershipLabel } from "@/components/AlbumMembershipLabel";
 import { LinkActions } from "@/components/LinkActions";
 import { LinkCover } from "@/components/LinkCover";
+import { LinkSummary } from "@/components/LinkSummary";
 import type { AlbumOption } from "@/db/albums";
 import type { Link } from "@/db/schema";
 import { formatRelativeTime } from "@/lib/time";
@@ -77,6 +78,8 @@ export function LinkCard({
         >
           {link.title}
         </h2>
+
+        <LinkSummary summary={link.summary} />
 
         {albums === undefined ? null : (
           <AlbumMembershipLabel

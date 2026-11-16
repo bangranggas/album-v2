@@ -4,7 +4,11 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
 import { callApi } from "@/lib/dashboard-api";
-import { MAX_TITLE_LENGTH, MAX_URL_LENGTH } from "@/lib/validation";
+import {
+  MAX_SUMMARY_LENGTH,
+  MAX_TITLE_LENGTH,
+  MAX_URL_LENGTH,
+} from "@/lib/validation";
 
 const FIELD =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-100 dark:focus:ring-slate-100";
@@ -33,6 +37,7 @@ export function AddLinkForm({ lockedDomains }: AddLinkFormProps) {
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
   const [thumbnail, setThumbnail] = useState("");
+  const [summary, setSummary] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -51,6 +56,8 @@ export function AddLinkForm({ lockedDomains }: AddLinkFormProps) {
       url,
       title,
       thumbnail,
+      // Left out when empty so a re-saved link keeps the summary it already has.
+      ...(summary.trim() === "" ? {} : { summary }),
     });
 
     setBusy(false);
@@ -69,6 +76,7 @@ export function AddLinkForm({ lockedDomains }: AddLinkFormProps) {
     setUrl("");
     setTitle("");
     setThumbnail("");
+    setSummary("");
     setNotice(
       !onLockedPage
         ? "Link saved."
@@ -138,6 +146,18 @@ export function AddLinkForm({ lockedDomains }: AddLinkFormProps) {
             type="url"
             placeholder="Optional image URL"
             maxLength={MAX_URL_LENGTH}
+            className={FIELD}
+          />
+        </label>
+
+        <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 sm:col-span-2">
+          Summary
+          <textarea
+            value={summary}
+            onChange={(event) => setSummary(event.target.value)}
+            rows={2}
+            placeholder="Optional — what this link is about"
+            maxLength={MAX_SUMMARY_LENGTH}
             className={FIELD}
           />
         </label>

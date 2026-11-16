@@ -4,6 +4,7 @@ import type { KeyboardEvent, MouseEvent } from "react";
 
 import { AlbumMembershipLabel } from "@/components/AlbumMembershipLabel";
 import { LinkActions } from "@/components/LinkActions";
+import { LinkSummary } from "@/components/LinkSummary";
 import { useSelection } from "@/components/SelectionProvider";
 import type { AlbumOption } from "@/db/albums";
 import type { Link } from "@/db/schema";
@@ -134,6 +135,8 @@ export function LinkList({
                   >
                     {link.title}
                   </a>
+
+                  <LinkSummary summary={link.summary} />
 
                   {/*
                     On phones the Domain/Albums/Updated columns are hidden, so the

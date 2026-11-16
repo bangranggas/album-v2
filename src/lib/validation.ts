@@ -4,6 +4,7 @@ import { isAlbumScope, type AlbumScope } from "./albums";
 
 export const MAX_URL_LENGTH = 2048;
 export const MAX_TITLE_LENGTH = 512;
+export const MAX_SUMMARY_LENGTH = 500;
 export const DEFAULT_LIMIT = 100;
 export const MAX_LIMIT = 200;
 
@@ -39,6 +40,7 @@ export interface LinkPatch {
   url?: string;
   domain?: string;
   thumbnail?: string | null;
+  summary?: string | null;
   isFavorite?: boolean;
 }
 
@@ -90,6 +92,20 @@ const titleField = z
   .trim()
   .min(1, "is required")
   .max(MAX_TITLE_LENGTH, `must be at most ${MAX_TITLE_LENGTH} characters`);
+
+/**
+ * An optional note. Blank and `null` both mean "no summary" (which is also how a
+ * stored one is cleared); anything else is trimmed and length-capped.
+ */
+const summaryField = z
+  .union([
+    z
+      .string()
+      .trim()
+      .max(MAX_SUMMARY_LENGTH, `must be at most ${MAX_SUMMARY_LENGTH} characters`),
+    z.null(),
+  ])
+  .transform((value) => (value === null || value === "" ? null : value));
 
 const linkInputSchema = z
   .object({
@@ -176,6 +192,7 @@ const manualLinkInputSchema = z
       .max(MAX_TITLE_LENGTH, `must be at most ${MAX_TITLE_LENGTH} characters`)
       .optional(),
     thumbnail: z.union([z.string(), z.null()]).optional(),
+    summary: summaryField.optional(),
   })
   .superRefine((value, ctx) => {
     const thumbnail = normalizeThumbnail(value.thumbnail);
@@ -197,6 +214,7 @@ const manualLinkInputSchema = z
           ? deriveTitleFromUrl(value.url)
           : value.title,
       thumbnail: normalizeThumbnail(value.thumbnail),
+      ...(value.summary === undefined ? {} : { summary: value.summary }),
       domain: parseHttpUrl(value.url)?.host ?? "",
     }),
   );
@@ -223,6 +241,7 @@ const linkPatchSchema = z
     title: titleField.optional(),
     url: urlField.optional(),
     thumbnail: z.union([z.string(), z.null()]).optional(),
+    summary: summaryField.optional(),
     isFavorite: z.boolean().optional(),
   })
   .superRefine((value, ctx) => {
@@ -242,6 +261,7 @@ const linkPatchSchema = z
 
     if (value.title !== undefined) patch.title = value.title;
     if (value.isFavorite !== undefined) patch.isFavorite = value.isFavorite;
+    if (value.summary !== undefined) patch.summary = value.summary;
     if (value.thumbnail !== undefined) {
       patch.thumbnail = normalizeThumbnail(value.thumbnail);
     }

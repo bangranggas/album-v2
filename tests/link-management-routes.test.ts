@@ -14,7 +14,7 @@ vi.mock("@/db/client", async (importOriginal) => {
 
 const { POST } = await import("@/app/api/dashboard/links/route");
 const { DELETE, PATCH } = await import("@/app/api/dashboard/links/[id]/route");
-const { listLinks, upsertLink } = await import("@/db/links");
+const { getLinkById, listLinks, upsertLink } = await import("@/db/links");
 const { addLinkToAlbum, createAlbum, listAlbums } = await import("@/db/albums");
 const { lockDomain } = await import("@/db/locked-domains");
 const { SESSION_COOKIE_NAME, signSession } = await import("@/lib/session");
@@ -280,6 +280,22 @@ describe("dashboard link routes", () => {
         ok: true,
         data: { link: { url: "https://other.example/moved", domain: "other.example" } },
       });
+    });
+
+    it("sets and clears the summary", async () => {
+      const id = await seededId();
+
+      const set = await PATCH(patchRequest(id, { summary: "About this" }), {
+        params: Promise.resolve({ id }),
+      });
+      expect(set.status).toBe(200);
+      expect((await getLinkById(testDatabase!.db, id))?.summary).toBe("About this");
+
+      const cleared = await PATCH(patchRequest(id, { summary: "" }), {
+        params: Promise.resolve({ id }),
+      });
+      expect(cleared.status).toBe(200);
+      expect((await getLinkById(testDatabase!.db, id))?.summary).toBeNull();
     });
 
     it("toggles the favorite flag", async () => {

@@ -7,7 +7,11 @@ import { AddToAlbumMenu } from "@/components/AddToAlbumMenu";
 import type { AlbumOption } from "@/db/albums";
 import type { Link } from "@/db/schema";
 import { callApi } from "@/lib/dashboard-api";
-import { MAX_TITLE_LENGTH, MAX_URL_LENGTH } from "@/lib/validation";
+import {
+  MAX_SUMMARY_LENGTH,
+  MAX_TITLE_LENGTH,
+  MAX_URL_LENGTH,
+} from "@/lib/validation";
 
 function StarIcon({ filled }: { filled: boolean }) {
   return (
@@ -119,6 +123,7 @@ export function LinkActions({
   const [title, setTitle] = useState(link.title);
   const [url, setUrl] = useState(link.url);
   const [thumbnail, setThumbnail] = useState(link.thumbnail ?? "");
+  const [summary, setSummary] = useState(link.summary ?? "");
   const [notice, setNotice] = useState<string | null>(null);
 
   /** A passcode that expired mid-session sends the visitor back to the prompt. */
@@ -192,6 +197,7 @@ export function LinkActions({
       title,
       url,
       thumbnail,
+      summary,
     });
 
     setBusy(false);
@@ -287,6 +293,17 @@ export function LinkActions({
             className={FIELD}
           />
         </label>
+        <label className="flex flex-col gap-1 text-[11px] font-medium text-slate-600 dark:text-slate-400">
+          Summary
+          <textarea
+            value={summary}
+            onChange={(event) => setSummary(event.target.value)}
+            maxLength={MAX_SUMMARY_LENGTH}
+            rows={3}
+            placeholder="Optional"
+            className={FIELD}
+          />
+        </label>
 
         {error === null ? null : (
           <p role="alert" className="text-xs text-red-600 dark:text-red-400">
@@ -309,6 +326,7 @@ export function LinkActions({
               setTitle(link.title);
               setUrl(link.url);
               setThumbnail(link.thumbnail ?? "");
+              setSummary(link.summary ?? "");
               setError(null);
               setMode("idle");
             }}
