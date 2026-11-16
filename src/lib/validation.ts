@@ -21,6 +21,8 @@ export interface LinkInput {
   url: string;
   title: string;
   thumbnail: string | null;
+  /** Optional note. Omitted means "leave any stored summary alone". */
+  summary?: string | null;
   /** Lowercased host of `url`, used to group and filter links on the dashboard. */
   domain: string;
 }

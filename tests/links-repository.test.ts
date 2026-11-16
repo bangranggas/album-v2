@@ -1434,3 +1434,74 @@ describe("listLinks include/exclude selections", () => {
     expect(titles(favorite)).toEqual(["Alpha"]);
   });
 });
+
+describe("link summary", () => {
+  let testDatabase: TestDatabase | undefined;
+
+  afterEach(async () => {
+    await testDatabase?.cleanup();
+    testDatabase = undefined;
+  });
+
+  it("upsertLink stores summary and leaves it alone when a later save omits it", async () => {
+    testDatabase = await createTestDatabase();
+    await upsertLink(testDatabase.db, { ...firstSave, summary: "a" });
+
+    const again = await upsertLink(testDatabase.db, firstSave);
+
+    expect(again.inserted).toBe(false);
+    expect(again.link.summary).toBe("a");
+  });
+
+  it("a new link without summary has a null summary", async () => {
+    testDatabase = await createTestDatabase();
+
+    const result = await upsertLink(testDatabase.db, firstSave);
+
+    expect(result.link.summary).toBeNull();
+  });
+
+  it("updateLink sets and clears summary", async () => {
+    testDatabase = await createTestDatabase();
+    const { link } = await upsertLink(testDatabase.db, firstSave);
+
+    const set = await updateLink(testDatabase.db, link.id, { summary: "x" });
+    expect(set.ok && set.link.summary).toBe("x");
+
+    const cleared = await updateLink(testDatabase.db, link.id, { summary: null });
+    expect(cleared.ok && cleared.link.summary).toBeNull();
+  });
+
+  it("listLinks query matches summary, escaping % and _", async () => {
+    testDatabase = await createTestDatabase();
+    await upsertLink(testDatabase.db, {
+      ...firstSave,
+      summary: "100% legit",
+    });
+
+    const percent = await listLinks(testDatabase.db, { query: "100%" });
+    const underscore = await listLinks(testDatabase.db, { query: "1_0" });
+
+    expect(percent).toHaveLength(1);
+    expect(underscore).toHaveLength(0);
+  });
+
+  it("listLinks offset skips rows in the same order", async () => {
+    testDatabase = await createTestDatabase();
+    for (const name of ["a", "b", "c"]) {
+      await upsertLink(testDatabase.db, {
+        url: `https://example.com/${name}`,
+        domain: "example.com",
+        title: name,
+        thumbnail: null,
+      });
+    }
+
+    const all = await listLinks(testDatabase.db);
+    const page = await listLinks(testDatabase.db, { limit: 1, offset: 1 });
+    const tail = await listLinks(testDatabase.db, { offset: 2 });
+
+    expect(page.map((row) => row.id)).toEqual([all[1]!.id]);
+    expect(tail.map((row) => row.id)).toEqual([all[2]!.id]);
+  });
+});

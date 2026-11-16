@@ -70,6 +70,8 @@ export interface ValueSelection {
 
 export interface ListLinksOptions extends ScopeOptions {
   limit?: number;
+  /** Rows to skip, after ordering. */
+  offset?: number;
   /** Exact domain match. `""` (or omitted) means "every domain". */
   domain?: string;
   /** Domain values to keep and to drop. Omitted means "no domain filter". */
@@ -103,6 +105,7 @@ export interface UpdateLinkPatch {
   /** The host of the new `url`, derived by the validation layer. */
   domain?: string;
   thumbnail?: string | null;
+  summary?: string | null;
   isFavorite?: boolean;
 }
 
@@ -249,6 +252,7 @@ export async function upsertLink(
       domain: input.domain,
       title: input.title,
       thumbnail: input.thumbnail,
+      summary: input.summary ?? null,
       createdAt: now,
       updatedAt: now,
     })
@@ -266,6 +270,9 @@ export async function upsertLink(
       domain: input.domain,
       title: input.title,
       thumbnail: input.thumbnail,
+      // Only when provided: the userscript and share target never send a summary,
+      // and a re-save from them must not wipe one written by the owner or agent.
+      ...(input.summary === undefined ? {} : { summary: input.summary }),
       updatedAt: now,
     })
     .where(eq(links.url, input.url))
@@ -345,6 +352,7 @@ export async function listLinks(
       or(
         sql`${links.title} LIKE ${pattern} ESCAPE '\\'`,
         sql`${links.url} LIKE ${pattern} ESCAPE '\\'`,
+        sql`${links.summary} LIKE ${pattern} ESCAPE '\\'`,
       ) as SQL,
     );
   }
@@ -355,11 +363,15 @@ export async function listLinks(
     .where(and(...conditions))
     .orderBy(desc(links.updatedAt), desc(sql`rowid`));
 
-  if (options.limit === undefined) {
+  if (options.limit === undefined && options.offset === undefined) {
     return statement;
   }
 
-  return statement.limit(options.limit);
+  // SQLite only accepts OFFSET after a LIMIT, and drizzle drops a negative one,
+  // so "no limit" is expressed as a limit no table will reach.
+  return statement
+    .limit(options.limit ?? Number.MAX_SAFE_INTEGER)
+    .offset(options.offset ?? 0);
 }
 
 /**
@@ -466,13 +478,15 @@ export async function updateLink(
   if (patch.url !== undefined) values.url = patch.url;
   if (patch.domain !== undefined) values.domain = patch.domain;
   if (patch.thumbnail !== undefined) values.thumbnail = patch.thumbnail;
+  if (patch.summary !== undefined) values.summary = patch.summary;
   if (patch.isFavorite !== undefined) values.isFavorite = patch.isFavorite;
 
   const touchesContent =
     values.title !== undefined ||
     values.url !== undefined ||
     values.domain !== undefined ||
-    values.thumbnail !== undefined;
+    values.thumbnail !== undefined ||
+    values.summary !== undefined;
 
   if (touchesContent) {
     values.updatedAt = Date.now();

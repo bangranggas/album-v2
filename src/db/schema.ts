@@ -30,6 +30,8 @@ export const links = sqliteTable(
     domain: text("domain").notNull(),
     title: text("title").notNull(),
     thumbnail: text("thumbnail"),
+    /** Optional short note on what the link is about; filled by the owner or the agent. */
+    summary: text("summary"),
     isFavorite: integer("is_favorite", { mode: "boolean" })
       .notNull()
       .default(false),
