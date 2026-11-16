@@ -538,14 +538,18 @@ async function getAlbumByNameKey(
 }
 
 /**
- * Album *names* per link, for a page of search results in one query. Unlike
- * `listAlbumIdsByLink` it is not scoped to a side: a link's memberships are already
- * confined to its own side (the membership guard enforces it), and the caller has
- * already decided the link may be shown.
+ * Album *names* per link, for a page of search results in one query.
+ *
+ * Scoped to one side, like `listAlbumIdsByLink`, and that is a privacy rule: the
+ * membership guard only stops a *new* cross-side filing, but revealing a locked
+ * domain leaves its links' memberships in locked albums behind. Without the side
+ * filter, a link that just became public would carry the name of a private album.
+ * Callers pass the side the *link* is on.
  */
 export async function listAlbumNamesByLink(
   db: Database,
   linkIds: readonly string[],
+  scope: AlbumScope,
 ): Promise<Map<string, string[]>> {
   if (linkIds.length === 0) return new Map();
 
@@ -558,7 +562,7 @@ export async function listAlbumNamesByLink(
     SELECT al.link_id, a.name
     FROM album_links al
     INNER JOIN albums a ON a.id = al.album_id
-    WHERE al.link_id IN (${placeholders})
+    WHERE al.link_id IN (${placeholders}) AND a.scope = ${scope}
     ORDER BY lower(a.name), a.created_at
   `);
 

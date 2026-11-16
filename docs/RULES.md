@@ -70,3 +70,12 @@ If a bug occurs or a test fails, execute the following 4-step debugging loop:
 \* **Self-Correction:** Review the code for security vulnerabilities, performance bottlenecks, and adherence to DRY (Don't Repeat Yourself) principles.
 
 \* **Summary:** Provide a concise summary of what was accomplished, how it works, and how the user can test or use the new code.
+
+
+## Model Policy for Reviews
+
+**Goal:** Keep review quality high without paying for the most expensive model.
+
+\* **Maximum model:** Any code review, final whole-branch review, or reviewer subagent must use **Claude Opus 5.5 (`opus`) at most**. Never use Fable (`fable`) for reviews, even when a skill says to use "the most capable available model".
+
+\* **Be explicit:** Always pass the model explicitly when dispatching a reviewer (`model: "opus"`), because an omitted model inherits the session's.

@@ -41,3 +41,7 @@ Thumbs.db
 # Local tooling secrets (contains a live API key — never commit)
 opencode.json
 opencode.jsonc
+
+# Python bytecode
+__pycache__/
+*.pyc

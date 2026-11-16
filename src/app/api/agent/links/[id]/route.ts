@@ -4,7 +4,7 @@ import { listAlbumNamesByLink } from "@/db/albums";
 import { getDb } from "@/db/client";
 import { deleteLink, updateLink } from "@/db/links";
 import { isDomainLocked } from "@/db/locked-domains";
-import { resolveLinkForAgent, toAgentDetail } from "@/lib/agent-api";
+import { resolveLinkForAgent, spaceToScope, toAgentDetail } from "@/lib/agent-api";
 import {
   authorizeAgent,
   CONFIRM_HEADER,
@@ -40,7 +40,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Next
     const resolved = await resolveLinkForAgent(db, id, access);
     if (resolved === undefined) return notFound("Link not found.");
 
-    const names = await listAlbumNamesByLink(db, [resolved.link.id]);
+    const names = await listAlbumNamesByLink(db, [resolved.link.id], spaceToScope(resolved.space));
 
     return jsonOk(toAgentDetail(resolved.link, names.get(resolved.link.id) ?? [], resolved.space));
   } catch (error) {
@@ -103,7 +103,7 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Ne
       fields: Object.keys(patch.data),
     });
 
-    const names = await listAlbumNamesByLink(db, [id]);
+    const names = await listAlbumNamesByLink(db, [id], spaceToScope(resolved.space));
 
     return jsonOk({ link: toAgentDetail(result.link, names.get(id) ?? [], resolved.space) });
   } catch (error) {

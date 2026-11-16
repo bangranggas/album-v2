@@ -73,6 +73,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     const names = await listAlbumNamesByLink(
       db,
       page.map((link) => link.id),
+      spaceToScope(params.space),
     );
 
     return jsonOk({
@@ -121,7 +122,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const { link, inserted } = await saveLinkForAgent(db, input.data);
-    const names = await listAlbumNamesByLink(db, [link.id]);
+    const names = await listAlbumNamesByLink(db, [link.id], spaceToScope(space));
 
     logEvent("agent_link_saved", {
       route: ROUTE,

@@ -17,7 +17,7 @@ const { GET: detailRoute } = await import("@/app/api/agent/links/[id]/route");
 const { GET: albumsRoute } = await import("@/app/api/agent/albums/route");
 const { addLinkToAlbum, createAlbum } = await import("@/db/albums");
 const { updateLink, upsertLink } = await import("@/db/links");
-const { lockDomain } = await import("@/db/locked-domains");
+const { lockDomain, unlockDomain } = await import("@/db/locked-domains");
 
 const AGENT_KEY = "agent-key-for-tests";
 const PASSCODE = "open sesame";
@@ -223,6 +223,23 @@ describe("GET /api/agent/links", () => {
     );
 
     expect(body.data.links.map((row: { id: string }) => row.id)).toEqual([seed.secret]);
+  });
+});
+
+describe("private album names after a domain is revealed", () => {
+  it("never reach a no-passcode caller through search or detail", async () => {
+    // secret.test is locked and its link sits in the locked album "Vault";
+    // revealing the domain moves the link to the public side but leaves the membership row.
+    await unlockDomain(dbState.db, "secret.test");
+
+    const search = await data(await call(searchRoute, "/api/agent/links?q=secret"));
+    const detail = await data(
+      await call(detailRoute, `/api/agent/links/${seed.secret}`, { id: seed.secret }),
+    );
+
+    expect(search.data.links[0].albums).toEqual([]);
+    expect(detail.data.albums).toEqual([]);
+    expect(JSON.stringify([search, detail])).not.toContain("Vault");
   });
 });
 

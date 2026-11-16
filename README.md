@@ -522,6 +522,13 @@ The passcode does appear in the chat you type it into, so it is only as private 
 cards and list rows, editable in the add/edit forms, and searched by `q`. The userscript,
 the share target and `/api/links` never send or return it, and a re-save by them keeps the stored one.
 
+**Deploying it: migrate first.** The code now reads `links.summary` everywhere (including
+`/api/links` and every dashboard page), so apply `drizzle/0005_*.sql` to Turso **before** the new
+code goes live — `npm run db:migrate` with `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` pointing at the
+hosted database (or `db:push`). The migration only adds a nullable column, so the old deployment
+keeps working against the migrated database; the reverse order (new code, old schema) answers `500`
+to the userscript and the PWA. Then add `AGENT_API_KEY` in Vercel.
+
 **Installing the kit** on the Hermes host: copy `agent-skill/link-collector/` into Hermes' skills
 folder, set `LC_BASE_URL` (your deployment URL) and `LC_AGENT_KEY` (= `AGENT_API_KEY`) in its
 environment, and make sure `python3` is available. Try it: `python lc.py search --limit 3`.

@@ -927,16 +927,33 @@ describe("listAlbumNamesByLink", () => {
     await addLinkToAlbum(db, work.album.id, one.id);
     await addLinkToAlbum(db, anime.album.id, one.id);
 
-    const names = await listAlbumNamesByLink(db, [one.id, two.id]);
+    const names = await listAlbumNamesByLink(db, [one.id, two.id], "visible");
 
     expect(names.get(one.id)).toEqual(["anime", "Work"]);
     expect(names.get(two.id)).toBeUndefined();
   });
 
+  it("only names albums on the requested side, so a membership that outlived an unlock stays hidden", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const { upsertLink } = await import("@/db/links");
+    const { unlockDomain } = await import("@/db/locked-domains");
+
+    const link = (await upsertLink(db, { url: "https://x.test/1", domain: "x.test", title: "x", thumbnail: null })).link;
+    await lockDomain(db, "x.test");
+    const vault = await createAlbum(db, makeAlbum("Vault", "locked"));
+    if (!vault.ok) throw new Error("setup failed");
+    await addLinkToAlbum(db, vault.album.id, link.id);
+    await unlockDomain(db, "x.test");
+
+    expect((await listAlbumNamesByLink(db, [link.id], "visible")).get(link.id)).toBeUndefined();
+    expect((await listAlbumNamesByLink(db, [link.id], "locked")).get(link.id)).toEqual(["Vault"]);
+  });
+
   it("returns an empty map for no ids", async () => {
     testDatabase = await createTestDatabase();
 
-    expect((await listAlbumNamesByLink(testDatabase.db, [])).size).toBe(0);
+    expect((await listAlbumNamesByLink(testDatabase.db, [], "visible")).size).toBe(0);
   });
 });
 

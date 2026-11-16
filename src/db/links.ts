@@ -76,7 +76,7 @@ export interface ListLinksOptions extends ScopeOptions {
   domain?: string;
   /** Domain values to keep and to drop. Omitted means "no domain filter". */
   domains?: ValueSelection;
-  /** Case-insensitive substring of the title or the url. `""` means "no search". */
+  /** Case-insensitive substring of the title, url or summary. `""` means "no search". */
   query?: string;
   /** `true` keeps only starred links; `false` (the default) applies no filter. */
   favorite?: boolean;
