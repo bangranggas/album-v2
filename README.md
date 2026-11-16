@@ -17,6 +17,9 @@ server never scrapes anything and can run entirely on free tiers.
 - **Locked area:** `/locked` — a dark, passcode-protected page where domains can be marked as
   hidden. Their links disappear from `/` entirely and live only there.
 - **Read API:** `GET /api/links` — secret-key protected JSON.
+- **Agent API:** `/api/agent/*` + a small skill/CLI in [`agent-skill/`](agent-skill/link-collector) so
+  an AI agent (Hermes) can search, add, edit, summarise, file and — after a confirmation step —
+  delete links. See [Agent API](#agent-api).
 - **Stack:** Next.js 16 (App Router) · TypeScript · Tailwind CSS 4 · Drizzle ORM · Turso/libSQL.
 
 Planning and design documents live in [`docs/instant-link-collector/`](docs/instant-link-collector),
@@ -28,7 +31,8 @@ albums in [`docs/albums/`](docs/albums), bulk album filing in
 [`docs/album-scope/`](docs/album-scope), the card's cover/membership affordances in
 [`docs/link-card-affordances/`](docs/link-card-affordances), the album-membership filter in
 [`docs/album-membership-filter/`](docs/album-membership-filter), and the list view plus
-multi-category filter modal in [`docs/link-list-and-multi-filter/`](docs/link-list-and-multi-filter).
+multi-category filter modal in [`docs/link-list-and-multi-filter/`](docs/link-list-and-multi-filter),
+and the agent bridge in [`docs/agent-bridge/`](docs/agent-bridge).
 
 ---
 
@@ -140,6 +144,7 @@ npm.cmd run db:seed -- --db=file:./scratch.db
 | `TURSO_AUTH_TOKEN` | production | Required for Turso, empty for local files. |
 | `SECRET_KEY` | yes | 32+ random characters. Used by the API and the userscript. |
 | `DASHBOARD_PASSWORD` | yes | Any non-blank value. If unset or blank, the dashboard returns `503`. |
+| `AGENT_API_KEY` | for the agent | Key for `/api/agent/*` (`x-agent-key`). If unset or blank, only those routes return `503`. Separate from `SECRET_KEY`. |
 | `LOCKED_PASSCODE` | for `/locked` | Any non-blank value. If unset or blank, only `/locked` returns `503`; the rest of the dashboard keeps working. |
 
 `.env.local` is gitignored. Never commit real values.
@@ -487,6 +492,44 @@ and popups get their data as server-rendered props, and every mutation ends in a
 returns every link, hidden or not, because it is already behind `SECRET_KEY` and is a machine
 interface rather than the screen you look at — and it neither reads nor writes albums.
 
+### Agent API
+
+`/api/agent/*` lets an AI agent manage links. It is authenticated by `x-agent-key`
+(`AGENT_API_KEY`), sends **no CORS headers**, and is meant for server-to-server calls. The kit that
+calls it lives in [`agent-skill/link-collector/`](agent-skill/link-collector): `SKILL.md` (the
+agent's instructions) and `lc.py` (a standard-library Python CLI printing compact text).
+
+| Endpoint | Notes |
+| --- | --- |
+| `GET /api/agent/links?q=&domain=&album=<id>&noAlbum=1&favorite=1&space=&limit=&offset=` | Compact rows `{id, title, domain, summary, albums[], fav}` plus `hasMore`. `q` matches title, URL and summary. Default `limit` 20, max 50. No URLs or thumbnails in the list. |
+| `GET /api/agent/links/:id` | One link in full, with `url`, `thumbnail`, `space`. |
+| `POST /api/agent/links` | `{url, title?, thumbnail?, summary?}`. Adds, or updates the link with that URL **changing only the fields sent**. `201` when new. |
+| `PATCH /api/agent/links/:id` | Any of `title, url, thumbnail, summary, isFavorite`. `summary: ""` clears it. A URL change may not cross the public/private line (`409`). |
+| `DELETE /api/agent/links/:id` | Without a valid `x-confirm` it deletes **nothing** and answers `409 CONFIRMATION_REQUIRED` with `{title, url, confirm}`. Repeat with `x-confirm: <token>` to delete. The token is valid 5 minutes and tied to that link as last updated, so an edit invalidates it. |
+| `GET /api/agent/albums?space=` | `{id, name, count}` per album. |
+| `POST /api/agent/albums` | `{name, space?}` (`public` by default). `409` for a duplicate name on that side. |
+| `POST /api/agent/albums/:id/links` | `{linkIds: [...]}` (max 200). Answers `{added, alreadyIn, skipped}`. |
+
+**Public vs private.** Everything is public unless the request says otherwise. The private space
+(`/locked`'s links and albums) opens only for a request that carries `x-locked-passcode` with the
+right `LOCKED_PASSCODE`, and only for that request: there is no cookie, session or token, so the
+agent has to be given the passcode again every time. Id-based calls on a private link or album
+without it answer `404`, exactly like an unknown id; a wrong passcode answers `403
+PASSCODE_REQUIRED` after a one-second delay (`AGENT_FAILURE_DELAY_MS` overrides it). Neither secret is logged.
+The passcode does appear in the chat you type it into, so it is only as private as that chat.
+
+**Summary.** `links.summary` is an optional note (max 500 characters) shown under the title on
+cards and list rows, editable in the add/edit forms, and searched by `q`. The userscript,
+the share target and `/api/links` never send or return it, and a re-save by them keeps the stored one.
+
+**Installing the kit** on the Hermes host: copy `agent-skill/link-collector/` into Hermes' skills
+folder, set `LC_BASE_URL` (your deployment URL) and `LC_AGENT_KEY` (= `AGENT_API_KEY`) in its
+environment, and make sure `python3` is available. Try it: `python lc.py search --limit 3`.
+
+> **Known gap, out of scope here:** `GET /api/links` (the userscript's read endpoint) still returns
+> private links to anyone holding `SECRET_KEY`. It was left untouched so the installed userscript
+> and PWA keep working; closing it is a separate task.
+
 ### CORS
 
 The API answers the `OPTIONS` preflight and sends
@@ -542,6 +585,12 @@ applied, so no cloud credentials and no cleanup are required.
 | `tests/sql-support.test.ts` | Shared SQL helpers: LIKE-pattern escaping and unique-violation detection through drizzle's error wrapper |
 | `tests/locked-domains-repository.test.ts` | Locking, unlocking, idempotency, and that a locked domain hides its links |
 | `tests/api-links.test.ts` | Full `POST`/`GET`/`OPTIONS` behaviour, status codes, CORS, analytics events |
+| `tests/agent-auth.test.ts` | Agent key + per-request passcode gate (503/401/403, no secret in logs, failure delay) and the delete confirmation token (binding, expiry, key isolation) |
+| `tests/agent-routes-read.test.ts` | Agent search/detail/albums: public-only by default, private gate, compact rows, validation of `limit`/`offset`/`space`, `404` for private ids |
+| `tests/agent-routes-links.test.ts` | Agent add/edit: field-preserving re-add, locked-domain gate, the no-leak URL conflict order, no boundary crossing |
+| `tests/agent-routes-delete.test.ts` | Two-step delete: preview deletes nothing; token bound to link/`updatedAt`/time; private needs passcode on both steps |
+| `tests/agent-routes-albums.test.ts` | Agent album create and bulk filing, per side, with the private-album `404` before any write |
+| `agent-skill/link-collector/test_lc.py` | The CLI (`python -m unittest discover -s agent-skill/link-collector -p test_lc.py`): request building, output format, local passcode check, exit codes |
 | `tests/time.test.ts` | Relative-time formatting boundaries |
 | `tests/userscript.test.ts` | Blacklist rules and metadata extraction, run in a Node `vm` harness |
 | `tests/test-db-helper.test.ts` | Migration application (including the `before`/`from` filters a mid-history migration test needs) and the unique index on `url` |
@@ -656,6 +705,10 @@ src/
       dashboard/albums/route.ts       POST: create an album
       dashboard/albums/[id]/route.ts  PATCH / DELETE: rename, delete
       dashboard/albums/[id]/links/route.ts              POST: file a selection into an album
+      agent/links/route.ts            GET search + POST add (agent key)
+      agent/links/[id]/route.ts       GET detail + PATCH edit + DELETE (confirmed)
+      agent/albums/route.ts           GET list + POST create
+      agent/albums/[id]/links/route.ts  POST: file many links into an album
       health/route.ts                 liveness probe (no auth, no data)
       links/route.ts                  POST + GET + OPTIONS (userscript, secret key)
       locked/unlock/route.ts          POST: exchange the passcode for a 1-hour cookie
@@ -707,6 +760,8 @@ src/
     auth.ts                 x-secret-key verification (userscript API)
     dashboard-api.ts        client-side fetch helper for the dashboard endpoints
     dashboard-auth.ts       dashboard password check + gate decision
+    agent-api.ts            agent search parsing, compact rows, private-aware link/album lookup
+    agent-auth.ts           x-agent-key + per-request passcode gate, delete confirmation token
     link-filters.ts         ?q= / ?domain= / ?album= / ?favorite= / ?tab= / ?aq= normalisation + URL building
     link-selection.ts       bulk selection rules: toggle, union, partition, labels, report
     locked-auth.ts          passcode check + locked gate decision
@@ -722,6 +777,7 @@ src/
   types/api.ts              wire format + error codes
 drizzle/                    generated SQL migrations (applied by tests too)
 tests/                      Vitest suites and helpers
+agent-skill/link-collector/ SKILL.md + lc.py + tests: the Hermes agent kit
 userscript/
   link-collector.user.js    the Tampermonkey script
 ```
