@@ -14,7 +14,7 @@ import {
   type SQL,
 } from "drizzle-orm";
 
-import type { LinkInput } from "@/lib/validation";
+import { deriveTitleFromUrl, type LinkInput } from "@/lib/validation";
 import type { Database } from "./client";
 import {
   albumLinks,
@@ -537,4 +537,53 @@ async function getLinkByUrl(db: Database, url: string): Promise<Link | undefined
   const rows = await db.select().from(links).where(eq(links.url, url)).limit(1);
 
   return rows[0];
+}
+
+/** What the agent may send when it saves a link: only the URL is required. */
+export interface AgentLinkInput {
+  url: string;
+  /** The host of `url`, derived by the validation layer. */
+  domain: string;
+  title?: string;
+  thumbnail?: string | null;
+  summary?: string | null;
+}
+
+/**
+ * Saves a link for the agent. Unlike `upsertLink` (which the userscript uses and
+ * which always rewrites title and thumbnail), a re-save here changes **only the
+ * fields that were sent**, so "add this URL again with a summary" cannot erase the
+ * cover or title the owner already has.
+ */
+export async function saveLinkForAgent(
+  db: Database,
+  input: AgentLinkInput,
+): Promise<UpsertResult> {
+  const existing = await getLinkByUrl(db, input.url);
+
+  if (existing === undefined) {
+    return upsertLink(db, {
+      url: input.url,
+      domain: input.domain,
+      title: input.title ?? deriveTitleFromUrl(input.url),
+      thumbnail: input.thumbnail ?? null,
+      summary: input.summary,
+    });
+  }
+
+  const patch: UpdateLinkPatch = {};
+  if (input.title !== undefined) patch.title = input.title;
+  if (input.thumbnail !== undefined) patch.thumbnail = input.thumbnail;
+  if (input.summary !== undefined) patch.summary = input.summary;
+
+  if (Object.keys(patch).length === 0) {
+    return { link: existing, inserted: false };
+  }
+
+  const result = await updateLink(db, existing.id, patch);
+  if (!result.ok) {
+    throw new Error(`Failed to update link: ${input.url}`);
+  }
+
+  return { link: result.link, inserted: false };
 }

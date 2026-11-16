@@ -61,3 +61,17 @@ export async function unlockDomain(
 
   return removed.length > 0;
 }
+
+/**
+ * Whether a domain is currently hidden. The agent API uses this to decide which
+ * side of the divide a URL would land on before it writes anything.
+ */
+export async function isDomainLocked(db: Database, domain: string): Promise<boolean> {
+  const rows = await db
+    .select({ domain: lockedDomains.domain })
+    .from(lockedDomains)
+    .where(eq(lockedDomains.domain, domain))
+    .limit(1);
+
+  return rows.length > 0;
+}

@@ -536,3 +536,69 @@ async function getAlbumByNameKey(
 
   return rows[0];
 }
+
+/**
+ * Album *names* per link, for a page of search results in one query. Unlike
+ * `listAlbumIdsByLink` it is not scoped to a side: a link's memberships are already
+ * confined to its own side (the membership guard enforces it), and the caller has
+ * already decided the link may be shown.
+ */
+export async function listAlbumNamesByLink(
+  db: Database,
+  linkIds: readonly string[],
+): Promise<Map<string, string[]>> {
+  if (linkIds.length === 0) return new Map();
+
+  const placeholders = sql.join(
+    linkIds.map((id) => sql`${id}`),
+    sql`, `,
+  );
+
+  const rows = await db.all<{ link_id: string; name: string }>(sql`
+    SELECT al.link_id, a.name
+    FROM album_links al
+    INNER JOIN albums a ON a.id = al.album_id
+    WHERE al.link_id IN (${placeholders})
+    ORDER BY lower(a.name), a.created_at
+  `);
+
+  const names = new Map<string, string[]>();
+
+  for (const row of rows) {
+    const collected = names.get(row.link_id) ?? [];
+    collected.push(row.name);
+    names.set(row.link_id, collected);
+  }
+
+  return names;
+}
+
+/** One album with its scoped link count and nothing else (no cover collage). */
+export interface AlbumCount {
+  id: string;
+  name: string;
+  linkCount: number;
+}
+
+/**
+ * The agent's album list: `listAlbums` without the cover queries. Same rule for the
+ * count — only links still on the album's side are counted — and an empty album
+ * still appears, with `0`.
+ */
+export async function listAlbumCounts(
+  db: Database,
+  scope: AlbumScope,
+): Promise<AlbumCount[]> {
+  return db
+    .select({
+      id: albums.id,
+      name: albums.name,
+      linkCount: count(links.id),
+    })
+    .from(albums)
+    .leftJoin(albumLinks, eq(albumLinks.albumId, albums.id))
+    .leftJoin(links, and(eq(links.id, albumLinks.linkId), scopeCondition(scope)))
+    .where(eq(albums.scope, scope))
+    .groupBy(albums.id, albums.name, albums.createdAt)
+    .orderBy(sql`lower(${albums.name})`, asc(albums.createdAt));
+}

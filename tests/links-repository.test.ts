@@ -7,6 +7,7 @@ import {
   listAllDomains,
   listDomains,
   listLinks,
+  saveLinkForAgent,
   updateLink,
   upsertLink,
 } from "@/db/links";
@@ -1503,5 +1504,61 @@ describe("link summary", () => {
 
     expect(page.map((row) => row.id)).toEqual([all[1]!.id]);
     expect(tail.map((row) => row.id)).toEqual([all[2]!.id]);
+  });
+});
+
+describe("saveLinkForAgent", () => {
+  let testDatabase: TestDatabase | undefined;
+
+  afterEach(async () => {
+    await testDatabase?.cleanup();
+    testDatabase = undefined;
+  });
+
+  it("keeps stored title and thumbnail when a re-save only sends a summary", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await upsertLink(db, firstSave);
+
+    const result = await saveLinkForAgent(db, {
+      url: firstSave.url,
+      domain: firstSave.domain,
+      summary: "s",
+    });
+
+    expect(result.inserted).toBe(false);
+    expect(result.link.title).toBe(firstSave.title);
+    expect(result.link.thumbnail).toBe(firstSave.thumbnail);
+    expect(result.link.summary).toBe("s");
+  });
+
+  it("overwrites only the fields that were sent", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await upsertLink(db, { ...firstSave, summary: "old" });
+
+    const result = await saveLinkForAgent(db, {
+      url: firstSave.url,
+      domain: firstSave.domain,
+      title: "New title",
+    });
+
+    expect(result.link.title).toBe("New title");
+    expect(result.link.summary).toBe("old");
+    expect(result.link.thumbnail).toBe(firstSave.thumbnail);
+  });
+
+  it("inserts a new link, deriving the title from the url when none is given", async () => {
+    testDatabase = await createTestDatabase();
+
+    const result = await saveLinkForAgent(testDatabase.db, {
+      url: "https://example.com/some/path",
+      domain: "example.com",
+    });
+
+    expect(result.inserted).toBe(true);
+    expect(result.link.title).toBe("example.com/some/path");
+    expect(result.link.thumbnail).toBeNull();
+    expect(result.link.summary).toBeNull();
   });
 });

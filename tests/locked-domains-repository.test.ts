@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { listLinks, upsertLink } from "@/db/links";
-import { listLockedDomains, lockDomain, unlockDomain } from "@/db/locked-domains";
+import {
+  isDomainLocked,
+  listLockedDomains,
+  lockDomain,
+  unlockDomain,
+} from "@/db/locked-domains";
 import type { LinkInput } from "@/lib/validation";
 import { createTestDatabase, type TestDatabase } from "./helpers/test-db";
 
@@ -172,5 +177,23 @@ describe("listLockedDomains", () => {
     expect(options).toEqual([
       { domain: "locked.example", count: 0, createdAt: expect.any(Number) },
     ]);
+  });
+});
+
+describe("isDomainLocked", () => {
+  let testDatabase: TestDatabase | undefined;
+
+  afterEach(async () => {
+    await testDatabase?.cleanup();
+    testDatabase = undefined;
+  });
+
+  it("is true only for a locked domain", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    await lockDomain(db, "secret.example");
+
+    expect(await isDomainLocked(db, "secret.example")).toBe(true);
+    expect(await isDomainLocked(db, "open.example")).toBe(false);
   });
 });

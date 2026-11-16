@@ -7,7 +7,9 @@ import {
   createAlbum,
   deleteAlbum,
   getAlbumById,
+  listAlbumCounts,
   listAlbumIdsByLink,
+  listAlbumNamesByLink,
   listAlbumOptions,
   listAlbums,
   removeLinkFromAlbum,
@@ -908,5 +910,60 @@ describe("deleting a link", () => {
     const albums = await listAlbums(db);
     expect(albums[0]?.linkCount).toBe(0);
     await expect(listAlbumIdsByLink(db, ["link-1"], "visible")).resolves.toEqual(new Map());
+  });
+});
+
+describe("listAlbumNamesByLink", () => {
+  it("returns album names per link, sorted, in one map", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const { upsertLink } = await import("@/db/links");
+
+    const one = (await upsertLink(db, { url: "https://a.test/1", domain: "a.test", title: "1", thumbnail: null })).link;
+    const two = (await upsertLink(db, { url: "https://a.test/2", domain: "a.test", title: "2", thumbnail: null })).link;
+    const work = await createAlbum(db, makeAlbum("Work"));
+    const anime = await createAlbum(db, makeAlbum("anime"));
+    if (!work.ok || !anime.ok) throw new Error("setup failed");
+    await addLinkToAlbum(db, work.album.id, one.id);
+    await addLinkToAlbum(db, anime.album.id, one.id);
+
+    const names = await listAlbumNamesByLink(db, [one.id, two.id]);
+
+    expect(names.get(one.id)).toEqual(["anime", "Work"]);
+    expect(names.get(two.id)).toBeUndefined();
+  });
+
+  it("returns an empty map for no ids", async () => {
+    testDatabase = await createTestDatabase();
+
+    expect((await listAlbumNamesByLink(testDatabase.db, [])).size).toBe(0);
+  });
+});
+
+describe("listAlbumCounts", () => {
+  it("counts only same-side links, lists an empty album with 0, orders by name", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+    const { upsertLink } = await import("@/db/links");
+
+    const open = (await upsertLink(db, { url: "https://open.test/1", domain: "open.test", title: "o", thumbnail: null })).link;
+    const hidden = (await upsertLink(db, { url: "https://hid.test/1", domain: "hid.test", title: "h", thumbnail: null })).link;
+    await lockDomain(db, "hid.test");
+
+    const zeta = await createAlbum(db, makeAlbum("Zeta"));
+    const alpha = await createAlbum(db, makeAlbum("Alpha"));
+    const secret = await createAlbum(db, makeAlbum("Secret", "locked"));
+    if (!zeta.ok || !alpha.ok || !secret.ok) throw new Error("setup failed");
+    await addLinkToAlbum(db, alpha.album.id, open.id);
+    await addLinkToAlbum(db, secret.album.id, hidden.id);
+
+    const visible = await listAlbumCounts(db, "visible");
+    const locked = await listAlbumCounts(db, "locked");
+
+    expect(visible).toEqual([
+      { id: alpha.album.id, name: "Alpha", linkCount: 1 },
+      { id: zeta.album.id, name: "Zeta", linkCount: 0 },
+    ]);
+    expect(locked).toEqual([{ id: secret.album.id, name: "Secret", linkCount: 1 }]);
   });
 });
