@@ -10,4 +10,5 @@ export interface NavItem {
  */
 export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/", label: "Links" },
+  { href: "/docs", label: "Docs" },
 ];

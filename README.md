@@ -529,6 +529,10 @@ hosted database (or `db:push`). The migration only adds a nullable column, so th
 keeps working against the migrated database; the reverse order (new code, old schema) answers `500`
 to the userscript and the PWA. Then add `AGENT_API_KEY` in Vercel.
 
+**Docs page.** The navbar's **Docs** entry (`/docs`, behind the dashboard login) walks through the
+setup below, example prompts, the rules and troubleshooting, with this deployment's address filled in.
+It never prints a secret.
+
 **Installing the kit** on the Hermes host: copy `agent-skill/link-collector/` into Hermes' skills
 folder, set `LC_BASE_URL` (your deployment URL) and `LC_AGENT_KEY` (= `AGENT_API_KEY`) in its
 environment, and make sure `python3` is available. Try it: `python lc.py search --limit 3`.
@@ -596,6 +600,7 @@ applied, so no cloud credentials and no cleanup are required.
 | `tests/agent-routes-read.test.ts` | Agent search/detail/albums: public-only by default, private gate, compact rows, validation of `limit`/`offset`/`space`, `404` for private ids |
 | `tests/agent-routes-links.test.ts` | Agent add/edit: field-preserving re-add, locked-domain gate, the no-leak URL conflict order, no boundary crossing |
 | `tests/agent-routes-delete.test.ts` | Two-step delete: preview deletes nothing; token bound to link/`updatedAt`/time; private needs passcode on both steps |
+| `tests/hermes-guide.test.ts` | The Docs navbar entry, deployment-origin detection from request headers, and the Hermes guide's content (incl. that it never prints a secret) |
 | `tests/agent-routes-albums.test.ts` | Agent album create and bulk filing, per side, with the private-album `404` before any write |
 | `agent-skill/link-collector/test_lc.py` | The CLI (`python -m unittest discover -s agent-skill/link-collector -p test_lc.py`): request building, output format, local passcode check, exit codes |
 | `tests/time.test.ts` | Relative-time formatting boundaries |
@@ -691,6 +696,7 @@ src/
     (app)/                  authenticated pages: navbar layout + dashboard
       layout.tsx            renders the navbar
       page.tsx              dashboard: Links + Albums tabs (password protected, force-dynamic)
+      docs/page.tsx         Docs: using the app from Hermes Agent
       albums/[id]/page.tsx  album detail: that album's visible links + full filters
     login/
       page.tsx              login page: single password field, no username
@@ -726,6 +732,8 @@ src/
     layout.tsx              root layout
   components/
     AddLinkForm.tsx         manual "add link" form
+    HermesGuide.tsx         the Docs page body: how to use the app from Hermes Agent
+    SummaryWordCount.tsx    "3/20 words" counter under the summary box
     AddToAlbumMenu.tsx      per-card album popup (one link, create + file in one flow)
     AlbumActions.tsx        inline rename / two-step delete for an album
     AlbumCard.tsx           cover collage / name / scoped link count
@@ -767,6 +775,7 @@ src/
     auth.ts                 x-secret-key verification (userscript API)
     dashboard-api.ts        client-side fetch helper for the dashboard endpoints
     dashboard-auth.ts       dashboard password check + gate decision
+    request-origin.ts       the deployment's address from request headers (Docs page)
     agent-api.ts            agent search parsing, compact rows, private-aware link/album lookup
     agent-auth.ts           x-agent-key + per-request passcode gate, delete confirmation token
     link-filters.ts         ?q= / ?domain= / ?album= / ?favorite= / ?tab= / ?aq= normalisation + URL building
