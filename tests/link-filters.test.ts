@@ -231,6 +231,64 @@ describe("resolveLinkFilters", () => {
       },
     );
   });
+
+  describe("sort", () => {
+    it("defaults to created", () => {
+      expect(resolveLinkFilters({}).sort).toBe("created");
+    });
+
+    it.each(["updated", "UPDATED", " Updated "])(
+      "reads %s as the updated sort",
+      (value) => {
+        expect(resolveLinkFilters({ sort: value }).sort).toBe("updated");
+      },
+    );
+
+    it.each(["", "created", "CREATED", "junk", "date"])(
+      "reads %s as the created sort",
+      (value) => {
+        expect(resolveLinkFilters({ sort: value }).sort).toBe("created");
+      },
+    );
+  });
+
+  describe("order", () => {
+    it("defaults to desc", () => {
+      expect(resolveLinkFilters({}).order).toBe("desc");
+    });
+
+    it.each(["asc", "ASC", " Asc "])(
+      "reads %s as the ascending order",
+      (value) => {
+        expect(resolveLinkFilters({ order: value }).order).toBe("asc");
+      },
+    );
+
+    it.each(["", "desc", "DESC", "junk", "up"])(
+      "reads %s as the descending order",
+      (value) => {
+        expect(resolveLinkFilters({ order: value }).order).toBe("desc");
+      },
+    );
+  });
+
+  describe("page", () => {
+    it("defaults to page 1", () => {
+      expect(resolveLinkFilters({}).page).toBe(1);
+    });
+
+    it("parses a positive integer page number", () => {
+      expect(resolveLinkFilters({ page: "2" }).page).toBe(2);
+      expect(resolveLinkFilters({ page: " 15 " }).page).toBe(15);
+    });
+
+    it.each(["", "0", "-1", "1.5", "abc", "NaN"])(
+      "falls back to page 1 for %s",
+      (value) => {
+        expect(resolveLinkFilters({ page: value }).page).toBe(1);
+      },
+    );
+  });
 });
 
 describe("hasActiveFilters", () => {
@@ -238,8 +296,11 @@ describe("hasActiveFilters", () => {
     expect(hasActiveFilters(NONE)).toBe(false);
   });
 
-  it("is false when only the view is list", () => {
+  it("is false when only the view is list, sort is updated, order is asc, or page is > 1", () => {
     expect(hasActiveFilters({ ...NONE, view: "list" })).toBe(false);
+    expect(hasActiveFilters({ ...NONE, sort: "updated" })).toBe(false);
+    expect(hasActiveFilters({ ...NONE, order: "asc" })).toBe(false);
+    expect(hasActiveFilters({ ...NONE, page: 3 })).toBe(false);
   });
 
   it("is true when only the query is set", () => {
@@ -271,7 +332,7 @@ describe("hasActiveFilters", () => {
 });
 
 describe("clearLinkFilters", () => {
-  it("clears every filter", () => {
+  it("clears every filter and resets page to 1", () => {
     expect(
       clearLinkFilters({
         query: "hotel",
@@ -280,12 +341,26 @@ describe("clearLinkFilters", () => {
         albumNone: true,
         favorite: true,
         view: "grid",
+        sort: "created",
+        order: "desc",
+        page: 4,
       }),
     ).toEqual(NONE);
   });
 
-  it("keeps the chosen view, which is not a filter", () => {
-    expect(clearLinkFilters({ ...NONE, view: "list" }).view).toBe("list");
+  it("keeps the chosen view, sort, and order, which are not narrowing filters", () => {
+    const cleared = clearLinkFilters({
+      ...NONE,
+      query: "hotel",
+      view: "list",
+      sort: "updated",
+      order: "asc",
+      page: 3,
+    });
+    expect(cleared.view).toBe("list");
+    expect(cleared.sort).toBe("updated");
+    expect(cleared.order).toBe("asc");
+    expect(cleared.page).toBe(1);
   });
 });
 
@@ -340,7 +415,7 @@ describe("buildLinksHref", () => {
     ).toBe("/?albumNone=1");
   });
 
-  it("writes the query, favorites, and view after the categories", () => {
+  it("writes the query, favorites, sort, order, view, and page after the categories", () => {
     expect(
       buildLinksHref({
         query: "hotel",
@@ -349,14 +424,32 @@ describe("buildLinksHref", () => {
         albumNone: false,
         favorite: true,
         view: "list",
+        sort: "updated",
+        order: "asc",
+        page: 2,
       }),
     ).toBe(
-      "/?domain=example.com&album=album-1&q=hotel&favorite=1&view=list",
+      "/?domain=example.com&album=album-1&q=hotel&favorite=1&sort=updated&order=asc&view=list&page=2",
     );
   });
 
   it("writes the view on its own", () => {
     expect(buildLinksHref({ ...NONE, view: "list" })).toBe("/?view=list");
+  });
+
+  it("writes sort=updated on its own and omits sort when created", () => {
+    expect(buildLinksHref({ ...NONE, sort: "updated" })).toBe("/?sort=updated");
+    expect(buildLinksHref({ ...NONE, sort: "created" })).toBe("/");
+  });
+
+  it("writes order=asc on its own and omits order when desc", () => {
+    expect(buildLinksHref({ ...NONE, order: "asc" })).toBe("/?order=asc");
+    expect(buildLinksHref({ ...NONE, order: "desc" })).toBe("/");
+  });
+
+  it("writes page when greater than 1 and omits page 1", () => {
+    expect(buildLinksHref({ ...NONE, page: 3 })).toBe("/?page=3");
+    expect(buildLinksHref({ ...NONE, page: 1 })).toBe("/");
   });
 
   it("encodes characters that cannot appear raw in a URL", () => {
@@ -375,6 +468,9 @@ describe("buildLinksHref", () => {
       albumNone: false,
       favorite: true,
       view: "list",
+      sort: "updated",
+      order: "asc",
+      page: 2,
     };
 
     expect(resolveLinkFilters(rawOf(buildLinksHref(filters)))).toEqual(filters);

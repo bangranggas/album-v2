@@ -86,7 +86,10 @@ export function LinkList({
             <th scope="col" className="w-44 py-2 pr-4 hidden md:table-cell">
               Albums
             </th>
-            <th scope="col" className="w-20 py-2 pr-4 hidden md:table-cell">
+            <th scope="col" className="w-24 py-2 pr-4 hidden md:table-cell">
+              Created
+            </th>
+            <th scope="col" className="w-24 py-2 pr-4 hidden md:table-cell">
               Updated
             </th>
             <th scope="col" className="w-48 py-2 pr-3 text-right md:w-56">
@@ -148,12 +151,23 @@ export function LinkList({
                       {host}
                     </span>
                     <span className="flex flex-wrap items-center gap-x-2">
-                      <time
-                        dateTime={new Date(link.updatedAt).toISOString()}
-                        className="whitespace-nowrap"
-                      >
-                        {formatRelativeTime(link.updatedAt)}
-                      </time>
+                      <span className="whitespace-nowrap">
+                        Created{" "}
+                        <time dateTime={new Date(link.createdAt).toISOString()}>
+                          {formatRelativeTime(link.createdAt)}
+                        </time>
+                      </span>
+                      {link.updatedAt > link.createdAt ? (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span className="whitespace-nowrap">
+                            Updated{" "}
+                            <time dateTime={new Date(link.updatedAt).toISOString()}>
+                              {formatRelativeTime(link.updatedAt)}
+                            </time>
+                          </span>
+                        </>
+                      ) : null}
                       {albums === undefined || memberAlbumIds.length === 0 ? null : (
                         <AlbumMembershipLabel
                           albumIds={memberAlbumIds}
@@ -184,9 +198,19 @@ export function LinkList({
                 </td>
 
                 <td className={`${hiddenCell} pr-4`}>
-                  <time dateTime={new Date(link.updatedAt).toISOString()}>
-                    {formatRelativeTime(link.updatedAt)}
+                  <time dateTime={new Date(link.createdAt).toISOString()}>
+                    {formatRelativeTime(link.createdAt)}
                   </time>
+                </td>
+
+                <td className={`${hiddenCell} pr-4`}>
+                  {link.updatedAt > link.createdAt ? (
+                    <time dateTime={new Date(link.updatedAt).toISOString()}>
+                      {formatRelativeTime(link.updatedAt)}
+                    </time>
+                  ) : (
+                    <span className="text-slate-400 dark:text-slate-600">—</span>
+                  )}
                 </td>
 
                 <td className="py-2 pr-3 align-middle text-right md:py-3">

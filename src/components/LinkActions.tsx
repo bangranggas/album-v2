@@ -107,6 +107,8 @@ export interface LinkActionsProps {
   memberAlbumIds?: readonly string[];
   /** Set on an album's page, where "remove from this album" makes sense. */
   removeFromAlbumId?: string;
+  /** When true, renders an "Open link" button alongside the action icons on the idle row. */
+  showOpenButton?: boolean;
 }
 
 export function LinkActions({
@@ -115,6 +117,7 @@ export function LinkActions({
   albums,
   memberAlbumIds,
   removeFromAlbumId,
+  showOpenButton = false,
 }: LinkActionsProps) {
   const router = useRouter();
   const [mode, setMode] = useState<"idle" | "editing" | "confirming">("idle");
@@ -381,63 +384,88 @@ export function LinkActions({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={toggleFavorite}
-          disabled={busy}
-          aria-pressed={link.isFavorite}
-          aria-label={link.isFavorite ? "Remove from favorites" : "Add to favorites"}
-          title={link.isFavorite ? "Remove from favorites" : "Add to favorites"}
-          className={`${ICON_BUTTON} ${
-            link.isFavorite ? "text-amber-500 hover:text-amber-600 dark:text-amber-400" : ""
-          }`}
-        >
-          <StarIcon filled={link.isFavorite} />
-        </button>
-        {albums === undefined ? null : (
-          <AddToAlbumMenu
-            linkId={link.id}
-            albums={albums}
-            memberAlbumIds={memberAlbumIds ?? []}
-            locked={locked}
-          />
-        )}
-        <button
-          type="button"
-          onClick={fetchThumbnail}
-          disabled={busy}
-          aria-label="Fetch thumbnail"
-          title="Fetch thumbnail from the page"
-          className={ICON_BUTTON}
-        >
-          <ImageIcon />
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setError(null);
-            setNotice(null);
-            setMode("editing");
-          }}
-          aria-label="Edit link"
-          title="Edit link"
-          className={ICON_BUTTON}
-        >
-          <PencilIcon />
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setError(null);
-            setMode("confirming");
-          }}
-          aria-label="Delete link"
-          title="Delete link"
-          className={`${ICON_BUTTON} hover:text-red-600 dark:hover:text-red-400`}
-        >
-          <TrashIcon />
-        </button>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={toggleFavorite}
+            disabled={busy}
+            aria-pressed={link.isFavorite}
+            aria-label={link.isFavorite ? "Remove from favorites" : "Add to favorites"}
+            title={link.isFavorite ? "Remove from favorites" : "Add to favorites"}
+            className={`${ICON_BUTTON} ${
+              link.isFavorite ? "text-amber-500 hover:text-amber-600 dark:text-amber-400" : ""
+            }`}
+          >
+            <StarIcon filled={link.isFavorite} />
+          </button>
+          {albums === undefined ? null : (
+            <AddToAlbumMenu
+              linkId={link.id}
+              albums={albums}
+              memberAlbumIds={memberAlbumIds ?? []}
+              locked={locked}
+            />
+          )}
+          <button
+            type="button"
+            onClick={fetchThumbnail}
+            disabled={busy}
+            aria-label="Fetch thumbnail"
+            title="Fetch thumbnail from the page"
+            className={ICON_BUTTON}
+          >
+            <ImageIcon />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setNotice(null);
+              setMode("editing");
+            }}
+            aria-label="Edit link"
+            title="Edit link"
+            className={ICON_BUTTON}
+          >
+            <PencilIcon />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setMode("confirming");
+            }}
+            aria-label="Delete link"
+            title="Delete link"
+            className={`${ICON_BUTTON} hover:text-red-600 dark:hover:text-red-400`}
+          >
+            <TrashIcon />
+          </button>
+        </div>
+
+        {showOpenButton ? (
+          <a
+            href={link.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300 dark:focus-visible:outline-slate-100"
+          >
+            Open link
+            <svg
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              className="h-3 w-3"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M7 17L17 7M9 7h8v8" />
+            </svg>
+          </a>
+        ) : null}
       </div>
 
       {removeFromAlbumId === undefined ? null : (

@@ -17,6 +17,8 @@ import {
  */
 
 export type LinkView = "grid" | "list";
+export type LinkSort = "created" | "updated";
+export type LinkOrder = "desc" | "asc";
 
 export interface LinkFilters {
   query: string;
@@ -26,11 +28,15 @@ export interface LinkFilters {
   albumNone: boolean;
   favorite: boolean;
   view: LinkView;
+  sort: LinkSort;
+  order: LinkOrder;
+  page: number;
 }
 
 /** Generous caps that comfortably fit any real title or search term. */
 export const MAX_QUERY_LENGTH = 200;
 export const MAX_DOMAIN_LENGTH = 253;
+export const MAX_PAGE = 10_000;
 
 /**
  * The album search box holds a name, so it is capped at the longest name the
@@ -68,6 +74,9 @@ export const EMPTY_FILTERS: LinkFilters = {
   albumNone: false,
   favorite: false,
   view: "grid",
+  sort: "created",
+  order: "desc",
+  page: 1,
 };
 
 function firstValue(raw: string | string[] | undefined): string {
@@ -167,6 +176,38 @@ export function resolveView(raw: RawSearchParams): LinkView {
 }
 
 /**
+ * Which timestamp sort order the URL asks for. Defaults to `"created"` so links
+ * stay in their initial upload order unless `"updated"` is explicitly requested.
+ */
+export function resolveSort(raw: RawSearchParams): LinkSort {
+  return firstValue(raw.sort).trim().toLowerCase() === "updated"
+    ? "updated"
+    : "created";
+}
+
+/**
+ * Which direction the sort runs in. Defaults to `"desc"` (newest first);
+ * `"asc"` flips to oldest first.
+ */
+export function resolveOrder(raw: RawSearchParams): LinkOrder {
+  return firstValue(raw.order).trim().toLowerCase() === "asc" ? "asc" : "desc";
+}
+
+/**
+ * 1-based page number from the URL. Invalid, zero, negative, or non-integer
+ * values fall back to page 1; huge values are capped at `MAX_PAGE`.
+ */
+export function resolvePage(raw: RawSearchParams): number {
+  const value = firstValue(raw.page).trim();
+  if (!/^\d+$/.test(value)) return 1;
+
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) return 1;
+
+  return Math.min(parsed, MAX_PAGE);
+}
+
+/**
  * Normalises raw `searchParams` into filters the repository can use directly.
  *
  * The domain is lowercased because that is how it is stored; the query is left
@@ -210,6 +251,9 @@ export function resolveLinkFilters(raw: RawSearchParams): LinkFilters {
     albumNone,
     favorite: AFFIRMATIVE.has(firstValue(raw.favorite).trim().toLowerCase()),
     view: resolveView(raw),
+    sort: resolveSort(raw),
+    order: resolveOrder(raw),
+    page: resolvePage(raw),
   };
 }
 
@@ -223,9 +267,14 @@ export function hasActiveFilters(filters: LinkFilters): boolean {
   );
 }
 
-/** The same filters with every category cleared, keeping only the view. */
+/** The same filters with every category cleared and page reset, keeping view, sort, and order. */
 export function clearLinkFilters(filters: LinkFilters): LinkFilters {
-  return { ...EMPTY_FILTERS, view: filters.view };
+  return {
+    ...EMPTY_FILTERS,
+    view: filters.view,
+    sort: filters.sort,
+    order: filters.order,
+  };
 }
 
 /**
@@ -261,7 +310,10 @@ export function buildLinksHref(filters: LinkFilters, basePath = "/"): string {
 
   if (filters.query !== "") params.set("q", filters.query);
   if (filters.favorite) params.set("favorite", "1");
+  if (filters.sort === "updated") params.set("sort", "updated");
+  if (filters.order === "asc") params.set("order", "asc");
   if (filters.view === "list") params.set("view", "list");
+  if (filters.page > 1) params.set("page", String(filters.page));
 
   const search = params.toString();
 

@@ -31,6 +31,7 @@ const BASE_PATH = "/locked";
 interface AlbumPageData {
   name: string;
   links: Link[];
+  hasMore: boolean;
   domains: DomainOption[];
   total: number;
   albums: { id: string; name: string }[];
@@ -69,19 +70,25 @@ async function loadAlbum(id: string, filters: FilterValues): Promise<AlbumResult
 
     // Scoped to *hidden* links, so the dark page shows this side of the album and
     // the light one can never be reached from here.
-    const [links, domains, total, albums] = await Promise.all([
+    const [rows, domains, total, albums] = await Promise.all([
       listLinks(db, {
-        limit: PAGE_LIMIT,
+        limit: PAGE_LIMIT + 1,
+        offset: (filters.page - 1) * PAGE_LIMIT,
         albumId: id,
         domains: filters.domains,
         query: filters.query,
         favorite: filters.favorite,
+        sort: filters.sort,
+        order: filters.order,
         scope: "locked",
       }),
       listDomains(db, { scope: "locked", albumId: id }),
       countLinks(db, { scope: "locked", albumId: id }),
       listAlbumOptions(db, "locked"),
     ]);
+
+    const links = rows.slice(0, PAGE_LIMIT);
+    const hasMore = rows.length > PAGE_LIMIT;
 
     const memberships = await listAlbumIdsByLink(
       db,
@@ -91,7 +98,7 @@ async function loadAlbum(id: string, filters: FilterValues): Promise<AlbumResult
 
     return {
       kind: "found",
-      data: { name: album.name, links, domains, total, albums, memberships },
+      data: { name: album.name, links, hasMore, domains, total, albums, memberships },
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -187,6 +194,7 @@ export default async function LockedAlbumPage({
           ) : (
             <LinkGrid
               links={result.data.links}
+              hasMore={result.data.hasMore}
               filters={filters}
               basePath={BASE_PATH}
               locked

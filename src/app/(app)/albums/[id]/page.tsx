@@ -28,6 +28,7 @@ interface AlbumPageData {
   name: string;
   /** Rows, aliased: `Link` is `next/link` in this file. */
   links: LinkRow[];
+  hasMore: boolean;
   domains: DomainOption[];
   total: number;
   albums: { id: string; name: string }[];
@@ -54,19 +55,25 @@ async function loadAlbum(
     }
 
     // Scoped to *visible* links: opening an album can never surface a hidden link.
-    const [links, domains, total, albums] = await Promise.all([
+    const [rows, domains, total, albums] = await Promise.all([
       listLinks(db, {
-        limit: PAGE_LIMIT,
+        limit: PAGE_LIMIT + 1,
+        offset: (filters.page - 1) * PAGE_LIMIT,
         albumId: id,
         domains: filters.domains,
         query: filters.query,
         favorite: filters.favorite,
+        sort: filters.sort,
+        order: filters.order,
         scope: "visible",
       }),
       listDomains(db, { scope: "visible", albumId: id }),
       countLinks(db, { scope: "visible", albumId: id }),
       listAlbumOptions(db, "visible"),
     ]);
+
+    const links = rows.slice(0, PAGE_LIMIT);
+    const hasMore = rows.length > PAGE_LIMIT;
 
     const memberships = await listAlbumIdsByLink(
       db,
@@ -76,7 +83,7 @@ async function loadAlbum(
 
     return {
       kind: "found",
-      data: { name: album.name, links, domains, total, albums, memberships },
+      data: { name: album.name, links, hasMore, domains, total, albums, memberships },
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -164,6 +171,7 @@ export default async function AlbumPage({
           ) : (
             <LinkGrid
               links={result.data.links}
+              hasMore={result.data.hasMore}
               filters={filters}
               basePath={BASE_PATH}
               albums={result.data.albums}

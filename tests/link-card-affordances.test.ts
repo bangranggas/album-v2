@@ -1,6 +1,15 @@
 import { createElement, type ReactElement } from "react";
 import { renderToString } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    refresh: vi.fn(),
+  }),
+  usePathname: () => "/",
+}));
 
 import { AlbumMembershipLabel } from "@/components/AlbumMembershipLabel";
 import { LinkCover } from "@/components/LinkCover";
@@ -164,5 +173,102 @@ describe("LinkSummary", () => {
 
     expect(render(createElement(LinkSummary, { summary: null }))).toBe("");
     expect(render(createElement(LinkSummary, { summary: "   " }))).toBe("");
+  });
+});
+
+describe("LinkCard and LinkList dual timestamps (createdAt & updatedAt)", () => {
+  const sampleLink = {
+    id: "link-dual-time",
+    url: "https://example.com/dual",
+    domain: "example.com",
+    title: "Dual Time Link",
+    thumbnail: null,
+    summary: "Short summary",
+    isFavorite: false,
+    createdAt: Date.parse("2026-01-10T10:00:00.000Z"),
+    updatedAt: Date.parse("2026-06-15T15:30:00.000Z"),
+  };
+
+  it("renders both Created (createdAt) and Updated (updatedAt) timestamps on LinkCard when updated after creation", async () => {
+    const { LinkCard } = await import("@/components/LinkCard");
+
+    const html = render(createElement(LinkCard, { link: sampleLink }));
+
+    expect(html).toContain('dateTime="2026-01-10T10:00:00.000Z"');
+    expect(html).toContain('dateTime="2026-06-15T15:30:00.000Z"');
+    expect(html).toContain("Created");
+    expect(html).toContain("Updated");
+  });
+
+  it("hides Updated on LinkCard when the link has never been updated since creation", async () => {
+    const { LinkCard } = await import("@/components/LinkCard");
+
+    const uneditedLink = {
+      ...sampleLink,
+      updatedAt: sampleLink.createdAt,
+    };
+
+    const html = render(createElement(LinkCard, { link: uneditedLink }));
+
+    expect(html).toContain('dateTime="2026-01-10T10:00:00.000Z"');
+    expect(html).toContain("Created");
+    expect(html).not.toContain("Updated");
+  });
+
+  it("renders both Created and Updated columns and timestamps on LinkList", async () => {
+    const { LinkList } = await import("@/components/LinkList");
+
+    const html = render(createElement(LinkList, { links: [sampleLink] }));
+
+    expect(html).toContain(">Created</th>");
+    expect(html).toContain(">Updated</th>");
+    expect(html).toContain('dateTime="2026-01-10T10:00:00.000Z"');
+    expect(html).toContain('dateTime="2026-06-15T15:30:00.000Z"');
+  });
+});
+
+describe("LinkPagination", () => {
+  it("renders nothing on page 1 when hasMore is false", async () => {
+    const { LinkPagination } = await import("@/components/LinkPagination");
+    const { EMPTY_FILTERS } = await import("@/lib/link-filters");
+
+    const html = render(
+      createElement(LinkPagination, {
+        filters: EMPTY_FILTERS,
+        hasMore: false,
+      }),
+    );
+
+    expect(html).toBe("");
+  });
+
+  it("renders Next link on page 1 when hasMore is true, preserving sort and view", async () => {
+    const { LinkPagination } = await import("@/components/LinkPagination");
+    const { EMPTY_FILTERS } = await import("@/lib/link-filters");
+
+    const html = render(
+      createElement(LinkPagination, {
+        filters: { ...EMPTY_FILTERS, sort: "updated", view: "list", page: 1 },
+        hasMore: true,
+      }),
+    );
+
+    expect(html).toContain("Page 1");
+    expect(html).toContain('href="/?sort=updated&amp;view=list&amp;page=2"');
+  });
+
+  it("renders Previous link on page 2 pointing back to page 1 without ?page=1", async () => {
+    const { LinkPagination } = await import("@/components/LinkPagination");
+    const { EMPTY_FILTERS } = await import("@/lib/link-filters");
+
+    const html = render(
+      createElement(LinkPagination, {
+        filters: { ...EMPTY_FILTERS, page: 2 },
+        hasMore: false,
+      }),
+    );
+
+    expect(html).toContain("Page 2");
+    expect(html).toContain('href="/"');
   });
 });

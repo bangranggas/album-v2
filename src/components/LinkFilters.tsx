@@ -16,6 +16,8 @@ import {
   clearLinkFilters,
   hasActiveFilters,
   type LinkFilters as FilterValues,
+  type LinkOrder,
+  type LinkSort,
   type LinkView,
 } from "@/lib/link-filters";
 
@@ -91,6 +93,27 @@ function ListIcon() {
   );
 }
 
+function SortOrderIcon({ order }: { order: LinkOrder }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      className="h-3.5 w-3.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {order === "asc" ? (
+        <path d="M12 19V5m-6 6l6-6 6 6" />
+      ) : (
+        <path d="M12 5v14m-6-6l6 6 6-6" />
+      )}
+    </svg>
+  );
+}
+
 const VIEW_ICONS: Record<LinkView, () => React.JSX.Element> = {
   grid: GridIcon,
   list: ListIcon,
@@ -99,6 +122,11 @@ const VIEW_ICONS: Record<LinkView, () => React.JSX.Element> = {
 const VIEW_LABELS: Record<LinkView, string> = {
   grid: "Grid",
   list: "List",
+};
+
+const SORT_LABELS: Record<LinkSort, string> = {
+  created: "Created",
+  updated: "Updated",
 };
 
 /**
@@ -220,7 +248,7 @@ export function LinkFilters({
 
     searchTimer.current = setTimeout(() => {
       searchTimer.current = null;
-      navigate({ ...filters, query: trimmed });
+      navigate({ ...filters, query: trimmed, page: 1 });
     }, DEBOUNCE_MS);
 
     return () => {
@@ -291,6 +319,9 @@ export function LinkFilters({
         albumNone,
         favorite: filters.favorite,
         view: filters.view,
+        sort: filters.sort,
+        order: filters.order,
+        page: 1,
       });
       setOpen(false);
     },
@@ -315,7 +346,7 @@ export function LinkFilters({
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              navigateNow({ ...filters, query: text.trim() });
+              navigateNow({ ...filters, query: text.trim(), page: 1 });
             }}
           >
             <input
@@ -346,6 +377,54 @@ export function LinkFilters({
               </span>
             )}
           </button>
+        </div>
+
+        <div className="flex w-full flex-col gap-1.5 sm:w-auto">
+          <span className={LABEL}>Sort</span>
+          <div
+            role="group"
+            aria-label="Sort order"
+            className="grid w-full grid-cols-2 rounded-lg border border-slate-300 bg-white p-0.5 shadow-sm sm:inline-flex sm:w-auto dark:border-slate-700 dark:bg-slate-950"
+          >
+            {(["created", "updated"] as const).map((sort) => {
+              const active = filters.sort === sort;
+              const nextOrder: LinkOrder =
+                active && filters.order === "desc" ? "asc" : "desc";
+              const directionLabel =
+                (active ? filters.order : "desc") === "asc"
+                  ? "oldest first"
+                  : "newest first";
+
+              return (
+                <button
+                  key={sort}
+                  type="button"
+                  aria-pressed={active}
+                  title={
+                    active
+                      ? `Sorted by ${SORT_LABELS[sort]} (${directionLabel}) — click to reverse`
+                      : `Sort by ${SORT_LABELS[sort]} (newest first)`
+                  }
+                  onClick={() =>
+                    navigateNow({
+                      ...filters,
+                      sort,
+                      order: nextOrder,
+                      page: 1,
+                    })
+                  }
+                  className={`inline-flex items-center justify-center gap-1 rounded-md px-2.5 py-2 text-xs font-medium transition sm:py-1.5 ${
+                    active
+                      ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
+                      : "text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  {SORT_LABELS[sort]}
+                  {active ? <SortOrderIcon order={filters.order} /> : null}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div className="flex w-full flex-col gap-1.5 sm:w-auto">
@@ -384,7 +463,9 @@ export function LinkFilters({
           <button
             type="button"
             aria-pressed={filters.favorite}
-            onClick={() => navigateNow({ ...filters, favorite: !filters.favorite })}
+            onClick={() =>
+              navigateNow({ ...filters, favorite: !filters.favorite, page: 1 })
+            }
             className={`inline-flex w-full items-center justify-center gap-2 font-medium sm:w-auto sm:justify-start ${FIELD} ${
               filters.favorite
                 ? "border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-500 dark:bg-amber-950 dark:text-amber-300"

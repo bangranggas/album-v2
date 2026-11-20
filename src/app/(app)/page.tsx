@@ -30,6 +30,7 @@ const PAGE_LIMIT = 100;
 
 interface DashboardData {
   links: Link[];
+  hasMore: boolean;
   domains: DomainOption[];
   total: number;
   /** Every album, for the per-card "add to album" popup. */
@@ -59,20 +60,26 @@ async function loadLinks(filters: FilterValues): Promise<DashboardData> {
   // One round trip each, in parallel: the filtered page, the full domain list
   // (so the dropdown can always switch domains), the unfiltered total, and the
   // albums this page is allowed to offer.
-  const [links, domains, total, albums] = await Promise.all([
+  const [rows, domains, total, albums] = await Promise.all([
     listLinks(db, {
-      limit: PAGE_LIMIT,
+      limit: PAGE_LIMIT + 1,
+      offset: (filters.page - 1) * PAGE_LIMIT,
       domains: filters.domains,
       albums: filters.albums,
       query: filters.query,
       favorite: filters.favorite,
       albumMembership: filters.albumNone ? "none" : undefined,
+      sort: filters.sort,
+      order: filters.order,
       scope: "visible",
     }),
     listDomains(db, { scope: "visible" }),
     countLinks(db, { scope: "visible" }),
     listAlbumOptions(db, "visible"),
   ]);
+
+  const links = rows.slice(0, PAGE_LIMIT);
+  const hasMore = rows.length > PAGE_LIMIT;
 
   // Then one more query for the whole page's memberships: asking per card would be
   // an N+1, and the ids are only known once the page of links is loaded.
@@ -82,7 +89,7 @@ async function loadLinks(filters: FilterValues): Promise<DashboardData> {
     "visible",
   );
 
-  return { links, domains, total, albums, memberships };
+  return { links, hasMore, domains, total, albums, memberships };
 }
 
 /**
@@ -201,6 +208,7 @@ export default async function HomePage({
           ) : (
             <LinkGrid
               links={result.data.links}
+              hasMore={result.data.hasMore}
               filters={filters}
               albums={result.data.albums}
               memberships={result.data.memberships}

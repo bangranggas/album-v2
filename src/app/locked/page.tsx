@@ -45,6 +45,7 @@ const BASE_PATH = "/locked";
 
 interface LockedData {
   links: Link[];
+  hasMore: boolean;
   /** Domains that hold hidden links, for the dropdown. */
   domains: DomainOption[];
   /** The locked list itself, with counts, for the management panel. */
@@ -85,14 +86,17 @@ async function readGate(): Promise<LockedGate> {
 async function loadLinks(filters: FilterValues): Promise<LockedData> {
   const db = getDb();
 
-  const [links, domains, lockedDomains, allDomains, total, albums] = await Promise.all([
+  const [rows, domains, lockedDomains, allDomains, total, albums] = await Promise.all([
     listLinks(db, {
-      limit: PAGE_LIMIT,
+      limit: PAGE_LIMIT + 1,
+      offset: (filters.page - 1) * PAGE_LIMIT,
       domains: filters.domains,
       albums: filters.albums,
       query: filters.query,
       favorite: filters.favorite,
       albumMembership: filters.albumNone ? "none" : undefined,
+      sort: filters.sort,
+      order: filters.order,
       scope: "locked",
     }),
     listDomains(db, { scope: "locked" }),
@@ -101,6 +105,9 @@ async function loadLinks(filters: FilterValues): Promise<LockedData> {
     countLinks(db, { scope: "locked" }),
     listAlbumOptions(db, "locked"),
   ]);
+
+  const links = rows.slice(0, PAGE_LIMIT);
+  const hasMore = rows.length > PAGE_LIMIT;
 
   // One query for the whole page's memberships, rather than one per card.
   const memberships = await listAlbumIdsByLink(
@@ -111,6 +118,7 @@ async function loadLinks(filters: FilterValues): Promise<LockedData> {
 
   return {
     links,
+    hasMore,
     domains,
     lockedDomains,
     suggestions: allDomains.map((option) => option.domain),
@@ -253,6 +261,7 @@ export default async function LockedPage({
               />
               <LinkGrid
                 links={result.data.links}
+                hasMore={result.data.hasMore}
                 filters={filters}
                 basePath={BASE_PATH}
                 locked

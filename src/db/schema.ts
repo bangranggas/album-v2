@@ -41,6 +41,8 @@ export const links = sqliteTable(
   (table) => [
     uniqueIndex("links_url_unique").on(table.url),
     index("links_domain_idx").on(table.domain),
+    index("links_created_at_idx").on(table.createdAt),
+    index("links_updated_at_idx").on(table.updatedAt),
   ],
 );
 

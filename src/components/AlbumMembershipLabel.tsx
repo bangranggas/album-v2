@@ -30,14 +30,14 @@ export function AlbumMembershipLabel({
   if (shown.length === 0) return null;
 
   return (
-    <p className="line-clamp-2 text-[11px] leading-4 text-slate-500 dark:text-slate-400">
+    <p className="flex flex-wrap items-center gap-1 text-[11px] leading-4 text-slate-500 dark:text-slate-400">
       <span className="text-slate-400 dark:text-slate-500">In </span>
       {shown.map((album, index) => (
-        <span key={album.id}>
-          {index === 0 ? null : <span aria-hidden="true">, </span>}
+        <span key={album.id} className="inline-flex items-center">
+          {index === 0 ? null : <span className="sr-only">, </span>}
           <Link
             href={albumHref(album.id, basePath)}
-            className="font-medium underline-offset-2 hover:text-slate-900 hover:underline dark:hover:text-slate-100"
+            className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 font-medium text-slate-700 transition hover:bg-slate-200 hover:text-slate-900 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-slate-100"
           >
             {album.name}
           </Link>
@@ -45,7 +45,7 @@ export function AlbumMembershipLabel({
       ))}
       {hidden.length === 0 ? null : (
         <span
-          className="ml-1 font-medium"
+          className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400"
           title={hidden.map((album) => album.name).join(", ")}
         >
           {/* One text child: React's streaming renderer would otherwise split

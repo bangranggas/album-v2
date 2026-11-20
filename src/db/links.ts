@@ -57,6 +57,16 @@ export interface ScopeOptions {
 export type AlbumMembershipFilter = "in" | "none";
 
 /**
+ * Which timestamp column `listLinks` orders by.
+ *
+ * - `created` (the default) orders by initial upload time (`createdAt DESC`), so
+ *   editing a summary or re-saving an existing URL does not move the link to the top.
+ * - `updated` orders by most recent modification (`updatedAt DESC`).
+ */
+export type LinkSort = "created" | "updated";
+export type LinkOrder = "desc" | "asc";
+
+/**
  * One category's include/exclude selection. Empty lists mean "do not narrow".
  *
  * The two lists are mutually exclusive by the time they reach the repository (the
@@ -86,6 +96,10 @@ export interface ListLinksOptions extends ScopeOptions {
   albums?: ValueSelection;
   /** Keep links that are in at least one album on this side, or in none. */
   albumMembership?: AlbumMembershipFilter;
+  /** Which timestamp column to order by (`"created"` by default). */
+  sort?: LinkSort;
+  /** Direction of the timestamp order (`"desc"` by default). */
+  order?: LinkOrder;
 }
 
 /** Options for the count helpers: a scope, and optionally one album. */
@@ -357,11 +371,15 @@ export async function listLinks(
     );
   }
 
+  const orderColumn =
+    options.sort === "updated" ? links.updatedAt : links.createdAt;
+  const direction = options.order === "asc" ? asc : desc;
+
   const statement = db
     .select()
     .from(links)
     .where(and(...conditions))
-    .orderBy(desc(links.updatedAt), desc(sql`rowid`));
+    .orderBy(direction(orderColumn), direction(sql`rowid`));
 
   if (options.limit === undefined && options.offset === undefined) {
     return statement;

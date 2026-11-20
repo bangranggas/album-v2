@@ -69,4 +69,17 @@ describe("test database helper", () => {
     expect(all.slice(beforeLatest.length)).toEqual(latest);
     expect(latest.length).toBeGreaterThan(0);
   });
+
+  it("creates indexes on created_at and updated_at for fast sorted pagination", async () => {
+    testDatabase = await createTestDatabase();
+    const { client } = testDatabase;
+
+    const result = await client.execute(
+      "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'links'",
+    );
+    const names = result.rows.map((row) => String(row.name));
+
+    expect(names).toContain("links_created_at_idx");
+    expect(names).toContain("links_updated_at_idx");
+  });
 });

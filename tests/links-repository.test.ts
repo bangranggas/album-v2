@@ -180,6 +180,78 @@ describe("listLinks", () => {
 
     expect(rows).toHaveLength(2);
   });
+
+  it("keeps links in their original createdAt order when an older link is edited or re-saved", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+
+    const first = await upsertLink(db, { ...firstSave, url: "https://example.com/1" });
+    const second = await upsertLink(db, { ...firstSave, url: "https://example.com/2" });
+    const third = await upsertLink(db, { ...firstSave, url: "https://example.com/3" });
+
+    // Edit summary on the first (oldest) link and re-save the second link
+    await updateLink(db, first.link.id, { summary: "Updated by Hermes agent" });
+    await upsertLink(db, {
+      ...firstSave,
+      url: second.link.url,
+      title: "Re-saved second link",
+    });
+
+    const rows = await listLinks(db);
+
+    expect(rows.map((row) => row.id)).toEqual([
+      third.link.id,
+      second.link.id,
+      first.link.id,
+    ]);
+  });
+
+  it("orders by updatedAt when sort is explicitly 'updated'", async () => {
+    testDatabase = await createTestDatabase();
+    const { db } = testDatabase;
+
+    await db.insert(links).values([
+      {
+        id: "link-1",
+        url: "https://example.com/1",
+        domain: "example.com",
+        title: "First Uploaded, Recently Updated",
+        thumbnail: null,
+        createdAt: 1000,
+        updatedAt: 5000,
+      },
+      {
+        id: "link-2",
+        url: "https://example.com/2",
+        domain: "example.com",
+        title: "Second Uploaded, Never Updated",
+        thumbnail: null,
+        createdAt: 2000,
+        updatedAt: 2000,
+      },
+      {
+        id: "link-3",
+        url: "https://example.com/3",
+        domain: "example.com",
+        title: "Third Uploaded, Mid Updated",
+        thumbnail: null,
+        createdAt: 3000,
+        updatedAt: 4000,
+      },
+    ]);
+
+    const byCreated = await listLinks(db, { sort: "created" });
+    expect(byCreated.map((row) => row.id)).toEqual(["link-3", "link-2", "link-1"]);
+
+    const byCreatedAsc = await listLinks(db, { sort: "created", order: "asc" });
+    expect(byCreatedAsc.map((row) => row.id)).toEqual(["link-1", "link-2", "link-3"]);
+
+    const byUpdated = await listLinks(db, { sort: "updated" });
+    expect(byUpdated.map((row) => row.id)).toEqual(["link-1", "link-3", "link-2"]);
+
+    const byUpdatedAsc = await listLinks(db, { sort: "updated", order: "asc" });
+    expect(byUpdatedAsc.map((row) => row.id)).toEqual(["link-2", "link-3", "link-1"]);
+  });
 });
 
 /** A small collection spread over two domains, used by the filter suites. */
